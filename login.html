@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ISP Billing — Sign in</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    />
+  </head>
+  <body class="login-page">
+    <main class="login-card" aria-labelledby="loginTitle">
+      <h1 id="loginTitle">ISP Billing</h1>
+      <p>Sign in with your operator credentials. Default admin: <strong>admin</strong> / <strong>Admin@123</strong></p>
+
+      <div id="loginError" class="error-banner" role="alert" hidden></div>
+
+      <form id="loginForm" autocomplete="on">
+        <div class="field">
+          <label for="username">Username</label>
+          <input id="username" name="username" type="text" required autocomplete="username" />
+        </div>
+        <div class="field mt-10">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" required autocomplete="current-password" />
+        </div>
+        <div class="mt-14">
+          <button class="btn primary w-full" type="submit" id="loginSubmit">
+            <i class="fa-solid fa-right-to-bracket" aria-hidden="true"></i>
+            Sign in
+          </button>
+        </div>
+      </form>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="js/config.js"></script>
+    <script src="messages/ui.js"></script>
+    <script src="js/auth.js"></script>
+  </body>
+</html>

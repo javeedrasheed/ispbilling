@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ISP Billing — Dashboard</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    />
+  </head>
+  <body>
+    <div id="toastRoot" class="toast" aria-live="polite"></div>
+
+    <div class="app-shell">
+      <aside class="sidebar no-print">
+        <div class="brand">
+          <i class="fa-solid fa-tower-broadcast fa-lg brand-icon" aria-hidden="true"></i>
+          <div>
+            <h1>ISP Billing</h1>
+            <small>Management</small>
+          </div>
+        </div>
+
+        <nav class="nav" aria-label="Primary">
+          <button type="button" class="active" data-view="dashboard">
+            <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
+            Dashboard
+          </button>
+          <button type="button" data-view="customers">
+            <i class="fa-solid fa-users" aria-hidden="true"></i>
+            Customers
+          </button>
+          <button type="button" data-view="dues">
+            <i class="fa-solid fa-file-invoice-dollar" aria-hidden="true"></i>
+            Dues
+          </button>
+          <button type="button" data-view="collection">
+            <i class="fa-solid fa-coins" aria-hidden="true"></i>
+            Collection
+          </button>
+          <button type="button" data-view="packages">
+            <i class="fa-solid fa-gauge-high" aria-hidden="true"></i>
+            Packages
+          </button>
+          <button type="button" data-view="reports">
+            <i class="fa-solid fa-file-csv" aria-hidden="true"></i>
+            Reports
+          </button>
+          <button type="button" data-view="settings">
+            <i class="fa-solid fa-gear" aria-hidden="true"></i>
+            Settings
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="user-pill">
+            <div class="meta">
+              <div id="sidebarUserName" class="name">—</div>
+              <div id="sidebarUserRole" class="role">—</div>
+            </div>
+            <button class="icon-btn" type="button" id="btnLogout" title="Logout" aria-label="Logout">
+              <i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div class="topbar no-print">
+          <h2 id="pageTitle">Dashboard</h2>
+        </div>
+
+        <section id="view-dashboard" class="view active" aria-label="Dashboard">
+          <div class="grid stats">
+            <div class="card">
+              <div class="label">Total customers</div>
+              <div class="value" id="statTotalCustomers">0</div>
+            </div>
+            <div class="card">
+              <div class="label">Active</div>
+              <div class="value" id="statActive">0</div>
+            </div>
+            <div class="card">
+              <div class="label">Expired</div>
+              <div class="value" id="statExpired">0</div>
+            </div>
+            <div class="card">
+              <div class="label">Total due (PKR)</div>
+              <div class="value" id="statDue">0</div>
+            </div>
+            <div class="card">
+              <div class="label">Today’s collection</div>
+              <div class="value" id="statToday">0</div>
+              <div class="hint">Sum of payments dated today</div>
+            </div>
+          </div>
+
+          <div class="actions-row no-print">
+            <button class="btn primary" type="button" id="qaAddCustomer">
+              <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
+              Add customer
+            </button>
+            <button class="btn ghost" type="button" id="qaExportCustomers">
+              <i class="fa-solid fa-file-export" aria-hidden="true"></i>
+              Export customers
+            </button>
+            <button class="btn ghost" type="button" id="qaImportCustomers">
+              <i class="fa-solid fa-file-import" aria-hidden="true"></i>
+              Import customers
+            </button>
+          </div>
+
+          <div class="card">
+            <div class="label">Expiring in next 10 days</div>
+            <div class="table-wrap push">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>User ID</th>
+                    <th>Phone</th>
+                    <th>Expiry</th>
+                    <th>Days left</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyExpiring"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card push">
+            <div class="label">Recent payments (last 7 days)</div>
+            <div class="table-wrap push">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Customer</th>
+                    <th>Invoice</th>
+                    <th>Paid</th>
+                    <th>Method</th>
+                    <th>Partial</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyRecentPayments"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="view-customers" class="view" aria-label="Customers">
+          <div class="toolbar no-print">
+            <div class="toolbar-filters">
+              <div class="field flex-1 min-220">
+                <label for="custSearch">Search</label>
+                <input id="custSearch" type="search" placeholder="Name, User ID, phone" />
+              </div>
+              <div class="field min-180">
+                <label for="custFilterArea">Area</label>
+                <select id="custFilterArea"></select>
+              </div>
+              <div class="field min-160">
+                <label for="custFilterStatus">Status</label>
+                <select id="custFilterStatus">
+                  <option value="">All</option>
+                  <option value="active">Active</option>
+                  <option value="expired">Expired</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+              <div class="field min-200">
+                <label for="custFilterPackage">Package</label>
+                <select id="custFilterPackage"></select>
+              </div>
+              <div class="field min-160">
+                <label for="custSortBy">Sort by</label>
+                <select id="custSortBy">
+                  <option value="name">Name</option>
+                  <option value="package">Package</option>
+                  <option value="expiry">Expiry date</option>
+                </select>
+              </div>
+            </div>
+            <div class="toolbar-actions">
+              <button class="btn primary" type="button" id="btnAddCustomer">
+                <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
+                Add customer
+              </button>
+              <button class="btn ghost" type="button" id="btnExportCustomers">
+                <i class="fa-solid fa-file-csv" aria-hidden="true"></i>
+                Export CSV
+              </button>
+              <button class="btn ghost" type="button" id="btnImportCustomers">
+                <i class="fa-solid fa-file-import" aria-hidden="true"></i>
+                Import CSV
+              </button>
+              <input type="file" id="custImportInput" accept=".csv,text/csv" hidden />
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>User ID</th>
+                  <th>Name</th>
+                  <th>Phone</th>
+                  <th>Area</th>
+                  <th>Package</th>
+                  <th>Expiry</th>
+                  <th>Due</th>
+                  <th>Status</th>
+                  <th class="no-print">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="tbodyCustomers"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="view-dues" class="view" aria-label="Dues">
+          <div class="card no-print">
+            <div class="label">Filter by area</div>
+            <div class="form-grid push">
+              <div class="field full">
+                <label for="duesFilterArea">Area</label>
+                <select id="duesFilterArea"></select>
+              </div>
+            </div>
+          </div>
+          <div class="card no-print push">
+            <div class="label">Open due ledger for any customer</div>
+            <div class="form-grid push">
+              <div class="field full">
+                <label for="dueAnyCustomer">Customer</label>
+                <select id="dueAnyCustomer"></select>
+              </div>
+            </div>
+            <div class="actions-row">
+              <button class="btn primary" type="button" id="btnDueOpenAny">
+                <i class="fa-solid fa-list" aria-hidden="true"></i>
+                Open due ledger
+              </button>
+            </div>
+            <p class="hint tight">
+              Add installation, misc, or other charges without recharging. Customers with a balance also have a Details button in the table below.
+            </p>
+          </div>
+          <div class="card push">
+            <div class="label">Customers with outstanding balance</div>
+            <div class="table-wrap push">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>User ID</th>
+                    <th>Area</th>
+                    <th>Phone</th>
+                    <th>Due (PKR)</th>
+                    <th class="no-print">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyDues"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="view-collection" class="view" aria-label="Collection">
+          <div class="card">
+            <div class="label">Collection</div>
+            <p class="hint tight">
+              All payments grouped by collection date. Only dates that have at least one payment are shown, newest first. Within a day, rows follow invoice number order.
+            </p>
+            <div id="collectionWeekRoot" class="collection-week"></div>
+          </div>
+        </section>
+
+        <section id="view-packages" class="view" aria-label="Packages">
+          <div class="toolbar no-print">
+            <h3 class="section-title">Packages</h3>
+            <button class="btn primary" type="button" id="btnAddPackage">
+              <i class="fa-solid fa-plus" aria-hidden="true"></i>
+              Add package
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Speed</th>
+                  <th>Price (PKR / month)</th>
+                  <th>Active</th>
+                  <th class="no-print">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="tbodyPackages"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="view-reports" class="view" aria-label="Reports">
+          <div class="card">
+            <div class="label">Date range</div>
+            <div class="form-grid push">
+              <div class="field">
+                <label for="repFrom">From</label>
+                <div class="date-input-row">
+                  <input id="repFrom" type="date" />
+                  <button
+                    type="button"
+                    class="btn ghost date-picker-btn"
+                    data-show-picker="repFrom"
+                    title="Open calendar"
+                    aria-label="Open calendar for from date"
+                  >
+                    <i class="fa-regular fa-calendar" aria-hidden="true"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="field">
+                <label for="repTo">To</label>
+                <div class="date-input-row">
+                  <input id="repTo" type="date" />
+                  <button
+                    type="button"
+                    class="btn ghost date-picker-btn"
+                    data-show-picker="repTo"
+                    title="Open calendar"
+                    aria-label="Open calendar for to date"
+                  >
+                    <i class="fa-regular fa-calendar" aria-hidden="true"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="actions-row no-print">
+              <button class="btn primary" type="button" id="repRefreshPreview">
+                <i class="fa-solid fa-rotate" aria-hidden="true"></i>
+                Refresh preview
+              </button>
+            </div>
+            <p class="hint tight">
+              Tables below follow the date range. Each section has <strong>CSV</strong> and <strong>PDF</strong> export. Use
+              <strong>Individual customer report</strong> for a full dossier (not limited by the range).
+            </p>
+          </div>
+
+          <div class="card push">
+            <div class="label">Individual customer report</div>
+            <p class="hint tight">
+              Installation date, current package, due ledger, and full payment history for one account.
+            </p>
+            <div class="form-grid push-md">
+              <div class="field full">
+                <label for="repCustomerSelect">Customer</label>
+                <select id="repCustomerSelect"></select>
+              </div>
+            </div>
+            <div class="actions-row no-print">
+              <button class="btn ghost" type="button" id="repCustomerCsv">
+                <i class="fa-solid fa-file-csv" aria-hidden="true"></i>
+                Export CSV
+              </button>
+              <button class="btn ghost" type="button" id="repCustomerPdf">
+                <i class="fa-solid fa-file-pdf" aria-hidden="true"></i>
+                Export PDF
+              </button>
+            </div>
+          </div>
+
+          <div class="card push">
+            <div class="toolbar no-print">
+              <h3 class="section-title">Collection</h3>
+              <div class="toolbar-actions">
+                <button class="btn ghost" type="button" id="repCollection">
+                  <i class="fa-solid fa-file-csv" aria-hidden="true"></i>
+                  CSV
+                </button>
+                <button class="btn ghost" type="button" id="repCollectionPdf">
+                  <i class="fa-solid fa-file-pdf" aria-hidden="true"></i>
+                  PDF
+                </button>
+              </div>
+            </div>
+            <div class="table-wrap push">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Invoice</th>
+                    <th>Customer</th>
+                    <th>User ID</th>
+                    <th>Paid</th>
+                    <th>Method</th>
+                    <th>Partial</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyRepCollection"></tbody>
+              </table>
+            </div>
+            <p class="hint tight" id="repSummaryCollection"></p>
+          </div>
+
+          <div class="card push">
+            <div class="toolbar no-print">
+              <h3 class="section-title">Customers (created in range)</h3>
+              <div class="toolbar-actions">
+                <button class="btn ghost" type="button" id="repCustomers">
+                  <i class="fa-solid fa-file-csv" aria-hidden="true"></i>
+                  CSV
+                </button>
+                <button class="btn ghost" type="button" id="repCustomersPdf">
+                  <i class="fa-solid fa-file-pdf" aria-hidden="true"></i>
+                  PDF
+                </button>
+              </div>
+            </div>
+            <div class="table-wrap push">
+              <table>
+                <thead>
+                  <tr>
+                    <th>User ID</th>
+                    <th>Name</th>
+                    <th>Phone</th>
+                    <th>Area</th>
+                    <th>Package</th>
+                    <th>Expiry</th>
+                    <th>Due</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyRepCustomers"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card push">
+            <div class="toolbar no-print">
+              <h3 class="section-title">Expiry (in range)</h3>
+              <div class="toolbar-actions">
+                <button class="btn ghost" type="button" id="repExpiry">
+                  <i class="fa-solid fa-file-csv" aria-hidden="true"></i>
+                  CSV
+                </button>
+                <button class="btn ghost" type="button" id="repExpiryPdf">
+                  <i class="fa-solid fa-file-pdf" aria-hidden="true"></i>
+                  PDF
+                </button>
+              </div>
+            </div>
+            <div class="table-wrap push">
+              <table>
+                <thead>
+                  <tr>
+                    <th>User ID</th>
+                    <th>Name</th>
+                    <th>Phone</th>
+                    <th>Expiry</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyRepExpiry"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card push">
+            <div class="toolbar no-print">
+              <h3 class="section-title">Due balances (current)</h3>
+              <div class="toolbar-actions">
+                <button class="btn ghost" type="button" id="repDue">
+                  <i class="fa-solid fa-file-csv" aria-hidden="true"></i>
+                  CSV
+                </button>
+                <button class="btn ghost" type="button" id="repDuePdf">
+                  <i class="fa-solid fa-file-pdf" aria-hidden="true"></i>
+                  PDF
+                </button>
+              </div>
+            </div>
+            <div class="table-wrap push">
+              <table>
+                <thead>
+                  <tr>
+                    <th>User ID</th>
+                    <th>Name</th>
+                    <th>Phone</th>
+                    <th>Due (PKR)</th>
+                    <th>Expiry</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyRepDue"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="view-settings" class="view" aria-label="Settings">
+          <div class="card no-print">
+            <div class="label">Settings sections</div>
+            <div class="actions-row">
+              <button class="btn primary" type="button" data-settings="pm">Payment methods</button>
+              <button class="btn ghost" type="button" data-settings="areas">Areas</button>
+              <button class="btn ghost" type="button" data-settings="discounts">Area discounts</button>
+            </div>
+          </div>
+
+          <div id="settingsPm" class="card">
+            <div class="toolbar no-print">
+              <h3 class="section-title">Payment methods</h3>
+              <button class="btn primary" type="button" id="btnAddPm">
+                <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                Add method
+              </button>
+            </div>
+            <div class="table-wrap push">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Active</th>
+                    <th class="no-print">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyPm"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="settingsAreas" class="card push">
+            <div class="toolbar no-print">
+              <h3 class="section-title">Areas</h3>
+              <div class="toolbar-actions">
+                <button class="btn primary" type="button" id="btnAddMainArea">
+                  <i class="fa-solid fa-map" aria-hidden="true"></i>
+                  Add main area
+                </button>
+                <button class="btn ghost" type="button" id="btnAddSubArea">
+                  <i class="fa-solid fa-map-pin" aria-hidden="true"></i>
+                  Add sub area
+                </button>
+              </div>
+            </div>
+            <div class="table-wrap push">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Area</th>
+                    <th>Parent</th>
+                    <th>Active</th>
+                    <th class="no-print">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyAreas"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="settingsDiscounts" class="card push">
+            <div class="toolbar no-print">
+              <h3 class="section-title">Area package discounts</h3>
+              <button class="btn primary" type="button" id="btnAddDiscount">
+                <i class="fa-solid fa-percent" aria-hidden="true"></i>
+                Add discount
+              </button>
+            </div>
+            <div class="table-wrap push">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Area</th>
+                    <th>Package</th>
+                    <th>Type</th>
+                    <th>Value</th>
+                    <th class="no-print">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyDiscounts"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="modalDueDetail" class="modal-backdrop no-print" role="dialog" aria-modal="true" hidden>
+      <div class="modal wide">
+        <div class="modal header">
+          <strong id="dueDetailTitle">Dues detail</strong>
+          <button class="icon-btn" type="button" data-close="modalDueDetail" aria-label="Close">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="modal body">
+          <div class="label">Due lines (each charge / month / fee)</div>
+          <div class="table-wrap push">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Type</th>
+                  <th>Original</th>
+                  <th>Paid</th>
+                  <th>Outstanding</th>
+                  <th>Recharge month</th>
+                  <th>Notes</th>
+                  <th class="no-print">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="tbodyDueCharges"></tbody>
+            </table>
+          </div>
+          <hr />
+          <div class="label">Add due (no recharge)</div>
+          <div class="form-grid">
+            <div class="field">
+              <label for="dueAddCategory">Category</label>
+              <select id="dueAddCategory">
+                <option value="installation">Installation cost</option>
+                <option value="misc">Miscellaneous</option>
+                <option value="monthly_manual">Monthly / service (manual)</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="dueAddAmount">Amount (PKR)</label>
+              <input id="dueAddAmount" type="number" step="0.01" min="0.01" placeholder="0" />
+            </div>
+            <div class="field full">
+              <label for="dueAddMonth">Recharge / period label (optional)</label>
+              <input id="dueAddMonth" type="text" placeholder="e.g. INSTALL MAY 2026" />
+            </div>
+            <div class="field full">
+              <label for="dueAddNotes">Notes (optional)</label>
+              <input id="dueAddNotes" type="text" placeholder="Description" />
+            </div>
+          </div>
+          <div class="actions-row end">
+            <button class="btn primary" type="button" id="btnSaveDueLine">
+              <i class="fa-solid fa-plus" aria-hidden="true"></i>
+              Add due line
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="modalCustomer" class="modal-backdrop no-print" role="dialog" aria-modal="true" hidden>
+      <div class="modal wide">
+        <div class="modal header">
+          <strong id="modalCustomerTitle">Customer</strong>
+          <button class="icon-btn" type="button" data-close="modalCustomer" aria-label="Close">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="modal body">
+          <input type="hidden" id="custId" />
+          <div class="form-grid">
+            <div class="field">
+              <label for="custPppoe">User ID</label>
+              <input id="custPppoe" required />
+            </div>
+            <div class="field">
+              <label for="custName">Full name</label>
+              <input id="custName" required />
+            </div>
+            <div class="field">
+              <label for="custPhone">Phone</label>
+              <input id="custPhone" />
+            </div>
+            <div class="field">
+              <label for="custEmail">Email</label>
+              <input id="custEmail" type="email" />
+            </div>
+            <div class="field">
+              <label for="custArea">Area</label>
+              <select id="custArea"></select>
+            </div>
+            <div class="field">
+              <label for="custPkg">Package</label>
+              <select id="custPkg"></select>
+            </div>
+            <div class="field full">
+              <label for="custAddress">Address</label>
+              <textarea id="custAddress"></textarea>
+            </div>
+            <div class="field">
+              <label for="custInstall">Installation date</label>
+              <div class="date-input-row">
+                <input id="custInstall" type="date" />
+                <button
+                  type="button"
+                  class="btn ghost date-picker-btn"
+                  data-show-picker="custInstall"
+                  title="Open calendar"
+                  aria-label="Open calendar for installation date"
+                >
+                  <i class="fa-regular fa-calendar" aria-hidden="true"></i>
+                </button>
+              </div>
+            </div>
+            <div class="field">
+              <label for="custExpiry">Initial expiry date</label>
+              <div class="date-input-row">
+                <input id="custExpiry" type="date" required />
+                <button
+                  type="button"
+                  class="btn ghost date-picker-btn"
+                  data-show-picker="custExpiry"
+                  title="Open calendar"
+                  aria-label="Open calendar for expiry date"
+                >
+                  <i class="fa-regular fa-calendar" aria-hidden="true"></i>
+                </button>
+              </div>
+              <p class="hint tight" id="custExpiryHint" hidden>
+                New customer: expiry defaults to one calendar month after installation, and updates when you change the installation date (you can still edit expiry manually).
+              </p>
+            </div>
+            <div class="field">
+              <label for="custIndType">Individual discount</label>
+              <select id="custIndType">
+                <option value="none">None (area discount only, if any)</option>
+                <option value="percentage">Percentage (stacks with area)</option>
+                <option value="fixed">Fixed PKR (stacks with area)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="custIndVal">Discount value</label>
+              <input id="custIndVal" type="number" step="0.01" min="0" value="0" />
+            </div>
+            <div class="field">
+              <label for="custStatus">Status</label>
+              <select id="custStatus">
+                <option value="active">Active</option>
+                <option value="expired">Expired</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="custExtraDuePanel" class="card push-md">
+            <div class="label" id="custExtraDueTitle">Charges to add (optional)</div>
+            <p class="hint tight" id="custExtraDueHint">
+              Enter one or more installation, misc, or other charges. Each row with an amount is saved to the dues ledger when you click Save. Use + to add rows. For existing customers, new rows are added on top of their current balance.
+            </p>
+            <div class="table-wrap push-md">
+              <table class="table-compact">
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Amount (PKR)</th>
+                    <th>Period label (opt.)</th>
+                    <th>Notes (opt.)</th>
+                    <th class="no-print" style="width: 44px"></th>
+                  </tr>
+                </thead>
+                <tbody id="custExtraDueRows"></tbody>
+              </table>
+            </div>
+            <div class="actions-row no-print">
+              <button type="button" class="btn ghost" id="custExtraDueAddRow">
+                <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                Add charge row
+              </button>
+            </div>
+          </div>
+
+          <div class="actions-row end">
+            <button class="btn ghost" type="button" data-close="modalCustomer">Cancel</button>
+            <button class="btn primary" type="button" id="btnSaveCustomer">
+              <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="modalCustomerView" class="modal-backdrop no-print" role="dialog" aria-modal="true" hidden>
+      <div class="modal wide">
+        <div class="modal header">
+          <strong id="customerViewTitle">Customer profile</strong>
+          <button class="icon-btn" type="button" data-close="modalCustomerView" aria-label="Close">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="modal body">
+          <div id="customerViewRoot"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="modalPayment" class="modal-backdrop no-print" role="dialog" aria-modal="true" hidden>
+      <div class="modal wide">
+        <div class="modal header">
+          <strong id="modalPaymentTitle">Recharge</strong>
+          <button class="icon-btn" type="button" data-close="modalPayment" aria-label="Close">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="modal body pay-mode-accrual" id="payModalBody">
+          <input type="hidden" id="payCustomerId" />
+          <input type="hidden" id="payMode" value="accrual" />
+
+          <div class="card payment-summary">
+            <div class="label" id="paySummaryCardTitle">Pricing breakdown</div>
+            <div class="table-wrap table-plain">
+              <table class="table-compact">
+                <tbody>
+                  <tr class="only-accrual">
+                    <td>Package price (PKR)</td>
+                    <td class="td-num"><span id="payBasePrice">0</span></td>
+                  </tr>
+                  <tr class="only-accrual">
+                    <td>Area discount</td>
+                    <td class="td-num"><span id="payAreaDiscLabel">—</span></td>
+                  </tr>
+                  <tr class="only-accrual">
+                    <td>Individual discount</td>
+                    <td class="td-num"><span id="payIndDiscLabel">—</span></td>
+                  </tr>
+                  <tr class="only-accrual">
+                    <td><strong>Monthly after discounts</strong></td>
+                    <td class="td-num"><strong id="payMonthlyFinal">0</strong></td>
+                  </tr>
+                  <tr id="payDueRow">
+                    <td id="payExistingDueLabel">Current dues balance</td>
+                    <td class="td-num"><span id="payExistingDue">0</span></td>
+                  </tr>
+                  <tr id="payGrandRow">
+                    <td><strong id="paySummaryLastLabel">New total dues</strong></td>
+                    <td class="td-num"><strong id="payGrandTotal">0</strong></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="hint top-space" id="payExpiryHint"></p>
+          </div>
+
+          <div class="card payment-summary only-accrual push-md">
+            <div class="label">Recharge dates</div>
+            <p class="hint tight">
+              The <strong>recharge date</strong> sets the billed month on the invoice (e.g. 18 May → RECHARGE MAY 2026). <strong>Package Expiry</strong> is always the same calendar day in the <em>next</em> month (e.g. 12 May → 12 June). Pick the recharge date from the calendar; the old expiry is not used.
+            </p>
+            <div class="form-grid push-md">
+              <div class="field">
+                <label for="payRechargeDate">Recharge date (invoice month)</label>
+                <div class="date-input-row">
+                  <input id="payRechargeDate" type="date" />
+                  <button
+                    type="button"
+                    class="btn ghost date-picker-btn"
+                    data-show-picker="payRechargeDate"
+                    title="Open calendar"
+                    aria-label="Open calendar for recharge date"
+                  >
+                    <i class="fa-regular fa-calendar" aria-hidden="true"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="field">
+                <label for="payNewExpiryDate">Package Expiry (next month)</label>
+                <div class="date-input-row">
+                  <input
+                    id="payNewExpiryDate"
+                    type="date"
+                    readonly
+                    title="Same day of month as recharge date, one month later"
+                    aria-readonly="true"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-grid push-md" id="payReceiveFields" hidden>
+            <div class="field">
+              <label for="payReceiveDate">Receive date</label>
+              <div class="date-input-row">
+                <input id="payReceiveDate" type="date" />
+                <button
+                  type="button"
+                  class="btn ghost date-picker-btn"
+                  data-show-picker="payReceiveDate"
+                  title="Open calendar"
+                  aria-label="Open calendar for receive date"
+                >
+                  <i class="fa-regular fa-calendar" aria-hidden="true"></i>
+                </button>
+              </div>
+            </div>
+            <div class="field">
+              <label for="payPaid">Amount received (PKR)</label>
+              <input id="payPaid" type="number" step="0.01" min="0" />
+            </div>
+            <div class="field">
+              <label for="payMethod">Payment method</label>
+              <select id="payMethod"></select>
+            </div>
+            <div class="field">
+              <label for="payTxn">Transaction ID (optional)</label>
+              <input id="payTxn" />
+            </div>
+            <div class="field full">
+              <label for="payNotes">Notes (optional)</label>
+              <textarea id="payNotes"></textarea>
+            </div>
+          </div>
+
+          <div class="actions-row end">
+            <button class="btn ghost" type="button" data-close="modalPayment">Cancel</button>
+            <button class="btn success" type="button" id="btnConfirmPayment">
+              <i class="fa-solid fa-calendar-plus" aria-hidden="true"></i>
+              <span id="btnConfirmPaymentLabel">Record recharge (dues)</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="modalPm" class="modal-backdrop no-print" role="dialog" aria-modal="true" hidden>
+      <div class="modal">
+        <div class="modal header">
+          <strong>Add payment method</strong>
+          <button class="icon-btn" type="button" data-close="modalPm" aria-label="Close">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="modal body">
+          <div class="field">
+            <label for="pmName">Method name</label>
+            <input id="pmName" />
+          </div>
+          <div class="field mt-10">
+            <label for="pmType">Method type</label>
+            <input id="pmType" placeholder="cash / wallet / bank / other" />
+          </div>
+          <div class="actions-row end">
+            <button class="btn ghost" type="button" data-close="modalPm">Cancel</button>
+            <button class="btn primary" type="button" id="btnSavePm">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="modalArea" class="modal-backdrop no-print" role="dialog" aria-modal="true" hidden>
+      <div class="modal">
+        <div class="modal header">
+          <strong id="modalAreaTitle">Area</strong>
+          <button class="icon-btn" type="button" data-close="modalArea" aria-label="Close">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="modal body">
+          <input type="hidden" id="areaId" />
+          <div class="field">
+            <label for="areaName">Area name</label>
+            <input id="areaName" required />
+          </div>
+          <div class="field mt-10">
+            <label for="areaParent">Parent area (sub-areas only)</label>
+            <select id="areaParent">
+              <option value="">— None (main area) —</option>
+            </select>
+          </div>
+          <div class="actions-row end">
+            <button class="btn ghost" type="button" data-close="modalArea">Cancel</button>
+            <button class="btn primary" type="button" id="btnSaveArea">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="modalPackage" class="modal-backdrop no-print" role="dialog" aria-modal="true" hidden>
+      <div class="modal">
+        <div class="modal header">
+          <strong id="modalPackageTitle">Package</strong>
+          <button class="icon-btn" type="button" data-close="modalPackage" aria-label="Close">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="modal body">
+          <input type="hidden" id="pkgId" />
+          <div class="field">
+            <label for="pkgName">Package name</label>
+            <input id="pkgName" required />
+          </div>
+          <div class="field mt-10">
+            <label for="pkgSpeed">Speed (Mbps)</label>
+            <input id="pkgSpeed" type="number" min="1" step="1" required />
+          </div>
+          <div class="field mt-10">
+            <label for="pkgPrice">Monthly price (PKR)</label>
+            <input id="pkgPrice" type="number" step="0.01" min="0" required />
+          </div>
+          <div class="actions-row end">
+            <button class="btn ghost" type="button" data-close="modalPackage">Cancel</button>
+            <button class="btn primary" type="button" id="btnSavePackage">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="modalDiscount" class="modal-backdrop no-print" role="dialog" aria-modal="true" hidden>
+      <div class="modal">
+        <div class="modal header">
+          <strong>Area discount</strong>
+          <button class="icon-btn" type="button" data-close="modalDiscount" aria-label="Close">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="modal body">
+          <input type="hidden" id="discId" />
+          <div class="field">
+            <label for="discArea">Area</label>
+            <select id="discArea"></select>
+          </div>
+          <div class="field mt-10">
+            <label for="discPkg">Package</label>
+            <select id="discPkg"></select>
+          </div>
+          <div class="field mt-10">
+            <label for="discType">Discount type</label>
+            <select id="discType">
+              <option value="percentage">Percentage</option>
+              <option value="fixed">Fixed (PKR)</option>
+            </select>
+          </div>
+          <div class="field mt-10">
+            <label for="discVal">Value</label>
+            <input id="discVal" type="number" step="0.01" min="0" />
+          </div>
+          <div class="actions-row end">
+            <button class="btn ghost" type="button" data-close="modalDiscount">Cancel</button>
+            <button class="btn primary" type="button" id="btnSaveDiscount">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="modalInvoice" class="modal-backdrop no-print" role="dialog" aria-modal="true" hidden>
+      <div class="modal wide">
+        <div class="modal header">
+          <strong id="invoiceModalTitle">Invoice</strong>
+          <div class="invoice-header-actions">
+            <button class="btn ghost" type="button" id="btnInvoicePdf">
+              <i class="fa-solid fa-file-pdf" aria-hidden="true"></i>
+              Download PDF
+            </button>
+            <button class="btn success" type="button" id="btnInvoiceWa">
+              <i class="fa-brands fa-whatsapp" aria-hidden="true"></i>
+              WhatsApp (PDF)
+            </button>
+            <button class="icon-btn" type="button" data-close="modalInvoice" aria-label="Close">
+              <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+        <div class="modal body">
+          <div id="invoiceRoot" class="invoice"></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="js/config.js"></script>
+    <script src="messages/ui.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/dashboard.js"></script>
+  </body>
+</html>
