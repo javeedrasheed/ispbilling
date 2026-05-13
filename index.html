@@ -46,6 +46,14 @@
             <i class="fa-solid fa-gauge-high" aria-hidden="true"></i>
             Packages
           </button>
+          <button type="button" data-view="payments">
+            <i class="fa-solid fa-credit-card" aria-hidden="true"></i>
+            Payment Methods
+          </button>
+          <button type="button" data-view="areas">
+            <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
+            Areas
+          </button>
           <button type="button" data-view="reports">
             <i class="fa-solid fa-file-csv" aria-hidden="true"></i>
             Reports
@@ -503,16 +511,7 @@
           </div>
         </section>
 
-        <section id="view-settings" class="view" aria-label="Settings">
-          <div class="card no-print">
-            <div class="label">Settings sections</div>
-            <div class="actions-row">
-              <button class="btn primary" type="button" data-settings="pm">Payment methods</button>
-              <button class="btn ghost" type="button" data-settings="areas">Areas</button>
-              <button class="btn ghost" type="button" data-settings="discounts">Area discounts</button>
-            </div>
-          </div>
-
+        <section id="view-payments" class="view" aria-label="Payment Methods">
           <div id="settingsPm" class="card">
             <div class="toolbar no-print">
               <h3 class="section-title">Payment methods</h3>
@@ -535,8 +534,10 @@
               </table>
             </div>
           </div>
+        </section>
 
-          <div id="settingsAreas" class="card push">
+        <section id="view-areas" class="view" aria-label="Areas">
+          <div id="settingsAreas" class="card">
             <div class="toolbar no-print">
               <h3 class="section-title">Areas</h3>
               <div class="toolbar-actions">
@@ -585,6 +586,88 @@
                   </tr>
                 </thead>
                 <tbody id="tbodyDiscounts"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="view-settings" class="view" aria-label="Settings">
+          <div class="card">
+            <div class="label">Change password</div>
+            <p class="hint tight">
+              Change the password for the currently logged-in user.
+            </p>
+            <div class="form-grid push-md">
+              <div class="field">
+                <label for="setCurrentPassword">Current password</label>
+                <input id="setCurrentPassword" type="password" autocomplete="current-password" />
+              </div>
+              <div class="field">
+                <label for="setNewPassword">New password</label>
+                <input id="setNewPassword" type="password" autocomplete="new-password" />
+              </div>
+              <div class="field">
+                <label for="setConfirmPassword">Confirm new password</label>
+                <input id="setConfirmPassword" type="password" autocomplete="new-password" />
+              </div>
+            </div>
+            <div class="actions-row end no-print">
+              <button class="btn primary" type="button" id="btnChangePassword">
+                <i class="fa-solid fa-key" aria-hidden="true"></i>
+                Change password
+              </button>
+            </div>
+          </div>
+
+          <div class="card push admin-only">
+            <div class="label">Create collection agent</div>
+            <p class="hint tight">
+              Collection agents can view customers, dues, collection, and reports, and can receive payments.
+            </p>
+            <div class="form-grid push-md">
+              <div class="field">
+                <label for="agentUsername">Username</label>
+                <input id="agentUsername" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="agentFullName">Full name</label>
+                <input id="agentFullName" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="agentEmail">Email</label>
+                <input id="agentEmail" type="email" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="agentPassword">Password</label>
+                <input id="agentPassword" type="password" autocomplete="new-password" />
+              </div>
+              <div class="field">
+                <label for="agentConfirmPassword">Confirm password</label>
+                <input id="agentConfirmPassword" type="password" autocomplete="new-password" />
+              </div>
+            </div>
+            <div class="actions-row end no-print">
+              <button class="btn success" type="button" id="btnCreateAgent">
+                <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
+                Create collection agent
+              </button>
+            </div>
+          </div>
+
+          <div class="card push admin-only">
+            <div class="label">User accounts</div>
+            <div class="table-wrap push">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Username</th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Active</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyUsers"></tbody>
               </table>
             </div>
           </div>

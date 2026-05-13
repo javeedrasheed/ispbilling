@@ -7,6 +7,7 @@
     packages: [],
     discounts: [],
     paymentMethods: [],
+    users: [],
     payments: [],
     dueCharges: [],
     paymentAllocations: [],
@@ -34,6 +35,25 @@
       return;
     }
     node.addEventListener(event, handler, options);
+  }
+
+  function currentRole() {
+    return (state.currentUser && state.currentUser.role) || "";
+  }
+
+  function isCollector() {
+    return currentRole() === "collector";
+  }
+
+  function isAdminUser() {
+    const r = currentRole();
+    return r === "admin" || r === "manager";
+  }
+
+  function requireAdminAction() {
+    if (isAdminUser()) return true;
+    toast("You do not have permission for this action.", "err");
+    return false;
   }
 
   function toast(msg, type) {
@@ -1337,6 +1357,7 @@
   }
 
   async function deletePaymentRecord(paymentId) {
+    if (!requireAdminAction()) return;
     const sb = getClient();
     const p = state.payments.find(function (x) {
       return x.id === paymentId;
@@ -1411,6 +1432,7 @@
   }
 
   async function deleteDueChargeRow(chargeId) {
+    if (!requireAdminAction()) return;
     const sb = getClient();
     const ch = state.dueCharges.find(function (x) {
       return x.id === chargeId;
@@ -1432,6 +1454,7 @@
   }
 
   async function saveManualDueCharge() {
+    if (!requireAdminAction()) return;
     const sb = getClient();
     const cid = state.dueDetailCustomerId;
     if (!cid) return;
@@ -1542,6 +1565,7 @@
       pkgRes,
       discRes,
       pmRes,
+      userRes,
       payRes,
       dcRes,
       pdaRes
@@ -1553,6 +1577,7 @@
       sb.from("packages").select("*").order("package_name"),
       sb.from("area_package_discounts").select("*"),
       sb.from("payment_methods").select("*").order("method_name"),
+      sb.from("users").select("id, username, email, full_name, role, is_active, created_at").order("username"),
       sb
         .from("payments")
         .select(
@@ -1568,6 +1593,7 @@
     if (pkgRes.error) throw pkgRes.error;
     if (discRes.error) throw discRes.error;
     if (pmRes.error) throw pmRes.error;
+    if (userRes.error) throw userRes.error;
     if (payRes.error) throw payRes.error;
 
     state.customers = custRes.data || [];
@@ -1575,6 +1601,7 @@
     state.packages = pkgRes.data || [];
     state.discounts = discRes.data || [];
     state.paymentMethods = pmRes.data || [];
+    state.users = userRes.data || [];
     state.payments = payRes.data || [];
     if (dcRes.error) {
       state.dueCharges = [];
@@ -1867,23 +1894,27 @@
           '<button class="btn ghost" type="button" data-act="view" data-id="' +
           escapeHtml(c.id) +
           '"><i class="fa-solid fa-eye"></i> View</button> ' +
-          '<button class="btn ghost" type="button" data-act="edit" data-id="' +
-          escapeHtml(c.id) +
-          '"><i class="fa-solid fa-pen"></i></button> ' +
           (Number(c.due_amount || 0) > 0
             ? '<button class="btn success" type="button" data-act="recv" data-id="' +
               escapeHtml(c.id) +
               '"><i class="fa-solid fa-coins"></i> Receive</button> '
             : "") +
-          '<button class="btn ghost" type="button" data-act="pay" data-id="' +
-          escapeHtml(c.id) +
-          '"><i class="fa-solid fa-bolt"></i> Recharge</button> ' +
+          (!isCollector()
+            ? '<button class="btn ghost" type="button" data-act="edit" data-id="' +
+              escapeHtml(c.id) +
+              '"><i class="fa-solid fa-pen"></i></button> ' +
+              '<button class="btn ghost" type="button" data-act="pay" data-id="' +
+              escapeHtml(c.id) +
+              '"><i class="fa-solid fa-bolt"></i> Recharge</button> '
+            : "") +
           '<button class="btn ghost" type="button" data-act="inv" data-id="' +
           escapeHtml(c.id) +
           '" title="Invoice / due statement"><i class="fa-solid fa-file-invoice"></i></button> ' +
-          '<button class="btn danger" type="button" data-act="del" data-id="' +
-          escapeHtml(c.id) +
-          '"><i class="fa-solid fa-trash"></i></button>' +
+          (!isCollector()
+            ? '<button class="btn danger" type="button" data-act="del" data-id="' +
+              escapeHtml(c.id) +
+              '"><i class="fa-solid fa-trash"></i></button>'
+            : "") +
           "</td></tr>"
         );
       })
@@ -2048,7 +2079,134 @@
       .join("");
   }
 
+  function renderUsers() {
+    const tb = $("tbodyUsers");
+    if (!tb) return;
+    tb.innerHTML = state.users
+      .map(function (u) {
+        return (
+          "<tr><td>" +
+          escapeHtml(u.username || "") +
+          "</td><td>" +
+          escapeHtml(u.full_name || "") +
+          "</td><td>" +
+          escapeHtml(u.email || "") +
+          "</td><td>" +
+          escapeHtml(u.role || "") +
+          "</td><td>" +
+          (u.is_active ? "Yes" : "No") +
+          "</td></tr>"
+        );
+      })
+      .join("");
+  }
+
+  function canAccessView(name) {
+    if (!isCollector()) return true;
+    return ["dashboard", "customers", "dues", "collection", "reports", "settings"].indexOf(name) !== -1;
+  }
+
+  function applyRolePermissions() {
+    const collector = isCollector();
+    document.querySelectorAll('[data-view="packages"], [data-view="payments"], [data-view="areas"]').forEach(function (el) {
+      el.hidden = collector;
+    });
+    document.querySelectorAll(".admin-only").forEach(function (el) {
+      el.hidden = !isAdminUser();
+    });
+    ["qaAddCustomer", "qaExportCustomers", "qaImportCustomers", "btnAddCustomer", "btnExportCustomers", "btnImportCustomers"].forEach(function (id) {
+      const el = $(id);
+      if (el) el.hidden = collector;
+    });
+  }
+
+  async function changeCurrentUserPassword() {
+    const current = $("setCurrentPassword") ? $("setCurrentPassword").value : "";
+    const next = $("setNewPassword") ? $("setNewPassword").value : "";
+    const confirmNext = $("setConfirmPassword") ? $("setConfirmPassword").value : "";
+    if (!current || !next || !confirmNext) {
+      toast("Enter current password, new password, and confirmation.", "err");
+      return;
+    }
+    if (next.length < 6) {
+      toast("New password must be at least 6 characters.", "err");
+      return;
+    }
+    if (next !== confirmNext) {
+      toast("New password and confirmation do not match.", "err");
+      return;
+    }
+    const sb = getClient();
+    const userId = state.currentUser && state.currentUser.id;
+    if (!userId) return;
+    const row = await sb.from("users").select("password_hash").eq("id", userId).maybeSingle();
+    if (row.error) {
+      toast(row.error.message, "err");
+      return;
+    }
+    const currentHash = await window.ISPAuth.sha256Hex(current);
+    if (!row.data || row.data.password_hash !== currentHash) {
+      toast("Current password is incorrect.", "err");
+      return;
+    }
+    const nextHash = await window.ISPAuth.sha256Hex(next);
+    const res = await sb.from("users").update({ password_hash: nextHash }).eq("id", userId);
+    if (res.error) {
+      toast(res.error.message, "err");
+      return;
+    }
+    ["setCurrentPassword", "setNewPassword", "setConfirmPassword"].forEach(function (id) {
+      const el = $(id);
+      if (el) el.value = "";
+    });
+    toast("Password changed.", "ok");
+  }
+
+  async function createCollectionAgentAccount() {
+    if (!requireAdminAction()) return;
+    const username = ($("agentUsername") && $("agentUsername").value.trim()) || "";
+    const fullName = ($("agentFullName") && $("agentFullName").value.trim()) || "";
+    const email = ($("agentEmail") && $("agentEmail").value.trim()) || "";
+    const password = ($("agentPassword") && $("agentPassword").value) || "";
+    const confirmPassword = ($("agentConfirmPassword") && $("agentConfirmPassword").value) || "";
+    if (!username || !fullName || !email || !password || !confirmPassword) {
+      toast("Fill all collection agent fields.", "err");
+      return;
+    }
+    if (password.length < 6) {
+      toast("Agent password must be at least 6 characters.", "err");
+      return;
+    }
+    if (password !== confirmPassword) {
+      toast("Agent password and confirmation do not match.", "err");
+      return;
+    }
+    const passwordHash = await window.ISPAuth.sha256Hex(password);
+    const res = await getClient().from("users").insert({
+      username: username,
+      email: email,
+      password_hash: passwordHash,
+      full_name: fullName,
+      role: "collector",
+      is_active: true
+    });
+    if (res.error) {
+      toast(res.error.message, "err");
+      return;
+    }
+    ["agentUsername", "agentFullName", "agentEmail", "agentPassword", "agentConfirmPassword"].forEach(function (id) {
+      const el = $(id);
+      if (el) el.value = "";
+    });
+    toast("Collection agent created.", "ok");
+    await refresh();
+  }
+
   function setView(name) {
+    if (!canAccessView(name)) {
+      toast("Collection agents can only view and collect payments.", "err");
+      name = "dashboard";
+    }
     document.querySelectorAll(".view").forEach(function (v) {
       v.classList.remove("active");
     });
@@ -2063,6 +2221,8 @@
       dues: "Dues",
       collection: "Collection",
       packages: "Packages",
+      payments: "Payment Methods",
+      areas: "Areas",
       reports: "Reports",
       settings: "Settings"
     };
@@ -2167,6 +2327,7 @@
   }
 
   async function saveCustomer() {
+    if (!requireAdminAction()) return;
     const sb = getClient();
     const extraLines = collectCustExtraDueRows();
     const row = {
@@ -2237,6 +2398,7 @@
   }
 
   async function deleteCustomer(id) {
+    if (!requireAdminAction()) return;
     if (!confirm(M.customers.deleteConfirm)) return;
     const sb = getClient();
     const res = await sb.from("customers").delete().eq("id", id);
@@ -2352,18 +2514,22 @@
           escapeHtml(p.transaction_id || "—") +
           "</td><td>" +
           escapeHtml(partial) +
-          '</td><td class="no-print">' +
-          '<button type="button" class="btn danger" data-customer-view-pay-del="' +
-          escapeHtml(p.id) +
-          '">Delete</button></td></tr>'
+          (!isCollector()
+            ? '</td><td class="no-print">' +
+              '<button type="button" class="btn danger" data-customer-view-pay-del="' +
+              escapeHtml(p.id) +
+              '">Delete</button></td></tr>'
+            : "</td></tr>")
         );
       })
       .join("");
     root.innerHTML =
-      '<div class="actions-row end">' +
-      '<button type="button" class="btn ghost" id="btnCustomerViewResetExpiry">' +
-      '<i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reset expiry from install date' +
-      "</button></div>" +
+      (!isCollector()
+        ? '<div class="actions-row end">' +
+          '<button type="button" class="btn ghost" id="btnCustomerViewResetExpiry">' +
+          '<i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reset expiry from install date' +
+          "</button></div>"
+        : "") +
       '<div class="card"><div class="label">Customer data</div>' +
       '<div class="table-wrap push"><table class="table-compact"><tbody>' +
       details +
@@ -2373,8 +2539,10 @@
       (dueRows || "<tr><td colspan='6' class='muted'>No due lines.</td></tr>") +
       "</tbody></table></div></div>" +
       '<div class="card push"><div class="label">Payment transactions</div>' +
-      '<div class="table-wrap push"><table><thead><tr><th>Date</th><th>Invoice</th><th>Paid</th><th>Method</th><th>Transaction ID</th><th>Partial</th><th class="no-print">Actions</th></tr></thead><tbody>' +
-      (paymentRows || "<tr><td colspan='7' class='muted'>No payment transactions.</td></tr>") +
+      '<div class="table-wrap push"><table><thead><tr><th>Date</th><th>Invoice</th><th>Paid</th><th>Method</th><th>Transaction ID</th><th>Partial</th>' +
+      (!isCollector() ? '<th class="no-print">Actions</th>' : "") +
+      "</tr></thead><tbody>" +
+      (paymentRows || "<tr><td colspan='" + (isCollector() ? "6" : "7") + "' class='muted'>No payment transactions.</td></tr>") +
       "</tbody></table></div></div>";
   }
 
@@ -2385,6 +2553,7 @@
   }
 
   async function resetCustomerExpiryFromInstall(customerId) {
+    if (!requireAdminAction()) return;
     const c = state.customers.find(function (x) {
       return x.id === customerId;
     });
@@ -2501,6 +2670,7 @@
     });
     if (!c) return;
     const m = mode === "receive" ? "receive" : "accrual";
+    if (m === "accrual" && !requireAdminAction()) return;
     setPaymentSubmitting(false);
     if (m === "receive" && Number(c.due_amount || 0) <= 0) {
       toast(
@@ -2602,6 +2772,7 @@
   }
 
   async function confirmAccrualRecharge() {
+    if (!requireAdminAction()) return;
     const sb = getClient();
     const c = state.payContext && state.payContext.customer;
     if (!c) return;
@@ -3709,6 +3880,7 @@
       renderPm();
       renderAreas();
       renderDiscounts();
+      renderUsers();
       renderCollection();
       renderReportsInline();
       renderDueLedgerCustomerSelect();
@@ -3788,10 +3960,12 @@
             ) +
             "</td><td>" +
             escapeHtml(partial) +
-            '</td><td class="no-print">' +
-            '<button type="button" class="btn danger" data-col-pay-del="' +
-            escapeHtml(String(p.id)) +
-            '">Delete</button></td></tr>'
+          (!isCollector()
+            ? '</td><td class="no-print">' +
+              '<button type="button" class="btn danger" data-col-pay-del="' +
+              escapeHtml(String(p.id)) +
+              '">Delete</button></td></tr>'
+            : "</td></tr>")
           );
         })
         .join("");
@@ -3806,7 +3980,8 @@
           "</div></div>" +
           '<div class="table-wrap">' +
           "<table><thead><tr>" +
-          "<th>Invoice</th><th>Customer</th><th>User ID</th><th>Paid</th><th>Method</th><th>Partial</th><th class='no-print'>Actions</th>" +
+          "<th>Invoice</th><th>Customer</th><th>User ID</th><th>Paid</th><th>Method</th><th>Partial</th>" +
+          (!isCollector() ? "<th class='no-print'>Actions</th>" : "") +
           "</tr></thead><tbody>" +
           tableBody +
           "</tbody></table></div></div>"
@@ -4793,23 +4968,8 @@
     onIf("btnInvoicePdf", "click", downloadInvoicePdf);
     onIf("btnInvoiceWa", "click", shareInvoiceWhatsApp);
 
-    document.querySelectorAll("[data-settings]").forEach(function (b) {
-      b.addEventListener("click", function () {
-        const key = b.getAttribute("data-settings");
-        document.querySelectorAll("[data-settings]").forEach(function (x) {
-          x.classList.toggle("primary", x === b);
-          x.classList.toggle("ghost", x !== b);
-        });
-        const settingsPm = $("settingsPm");
-        const settingsAreas = $("settingsAreas");
-        const settingsDiscounts = $("settingsDiscounts");
-        if (settingsPm) settingsPm.style.display = key === "pm" ? "block" : "none";
-        if (settingsAreas) settingsAreas.style.display = key === "areas" ? "block" : "none";
-        if (settingsDiscounts) {
-          settingsDiscounts.style.display = key === "discounts" ? "block" : "none";
-        }
-      });
-    });
+    onIf("btnChangePassword", "click", changeCurrentUserPassword);
+    onIf("btnCreateAgent", "click", createCollectionAgentAccount);
   }
 
   document.addEventListener("DOMContentLoaded", async function () {
@@ -4823,15 +4983,9 @@
       if (sr) sr.textContent = u.role || "";
 
       wireNav();
+      applyRolePermissions();
       wireAccrualRechargeDateSync();
       initReportsDefaultRange();
-
-      const settingsPm0 = $("settingsPm");
-      const settingsAreas0 = $("settingsAreas");
-      const settingsDiscounts0 = $("settingsDiscounts");
-      if (settingsPm0) settingsPm0.style.display = "block";
-      if (settingsAreas0) settingsAreas0.style.display = "none";
-      if (settingsDiscounts0) settingsDiscounts0.style.display = "none";
 
       await refresh();
     } catch (err) {

@@ -1,0 +1,654 @@
+ISP Billing Web App - Full Feature Details
+==========================================
+
+App Name:
+ISP Billing Management
+
+Purpose:
+This web app is built for managing ISP/internet customers, packages, areas, dues, recharges, collections, invoices, and reports. It uses Supabase as the backend database and runs as a browser-based dashboard.
+
+
+1. Login and User Access
+------------------------
+
+Features:
+- Login screen for app access.
+- User details shown in the sidebar after login.
+- Logout button in the sidebar.
+- User roles are stored in the database, including admin, manager, and collector.
+
+Database table:
+- users
+
+Stored user fields:
+- username
+- email
+- password_hash
+- full_name
+- role
+- is_active
+- created_at
+
+
+2. Dashboard
+------------
+
+The dashboard gives a quick overview of the ISP business.
+
+Dashboard cards:
+- Total customers
+- Active customers
+- Expired customers
+- Total due amount
+- Today's collection
+
+Dashboard quick actions:
+- Add customer
+- Export customers
+- Import customers
+
+Dashboard tables:
+- Customers expiring in the next 10 days
+- Recent payments from the last 7 days
+
+Customer expiry logic:
+- If package expiry date is before today, customer status becomes expired.
+- If package expiry date is today or later, customer status becomes active.
+- Inactive customers remain inactive.
+
+
+3. Customers
+------------
+
+The Customers screen manages customer records.
+
+Customer fields:
+- User ID / PPPoE ID
+- Full name
+- Phone
+- Email
+- Area / sub-area
+- Address
+- Package
+- Installation date
+- Package expiry date
+- Individual discount type
+- Individual discount value
+- Status
+- Due amount
+
+Customer filters:
+- Search by name, User ID, or phone
+- Filter by area
+- Filter by status
+- Filter by package
+- Sort by name
+- Sort by package
+- Sort by expiry date
+
+Customer actions:
+- View customer profile
+- Edit customer
+- Receive payment
+- Recharge / add monthly fee to dues
+- Open invoice / due statement
+- Delete customer
+
+Customer add/edit behavior:
+- New customers can be added with package, area, install date, expiry date, and status.
+- Customer area selection uses sub-areas directly.
+- New customer expiry defaults to one month after installation date.
+- Customer expiry updates when changing installation date for a new customer.
+- Existing customers can be edited.
+- Extra dues can be added while creating or editing a customer.
+
+Customer profile view:
+- Shows customer details.
+- Shows due lines.
+- Shows all payment transactions.
+- Allows deleting any payment transaction.
+- Allows resetting expiry from install date.
+
+Reset expiry feature:
+- Resets package expiry date to one month after installation date.
+- Updates status to active or expired based on the reset expiry date.
+- Inactive customers remain inactive.
+
+Customer import/export:
+- Export visible customers to CSV.
+- Import customers from CSV.
+- Import supports matching areas and packages by name.
+
+
+4. Areas and Sub-Areas
+----------------------
+
+The app supports area hierarchy.
+
+Area structure:
+- Main area
+- Sub-area under a main area
+
+Customer assignment:
+- Customers are assigned directly to sub-areas.
+- Customer add/edit dropdown shows sub-areas only.
+
+Dues filtering:
+- Dues filter shows All areas plus sub-areas.
+- This avoids duplicate-looking main area and sub-area entries.
+
+Settings:
+- Add main area.
+- Add sub-area.
+- Delete area.
+
+Database table:
+- areas
+
+Stored area fields:
+- area_name
+- parent_area_id
+- is_active
+
+
+5. Packages
+-----------
+
+Packages define customer plans.
+
+Package fields:
+- Package name
+- Speed in Mbps
+- Monthly price
+- Active status
+
+Package actions:
+- Add package
+- Edit package
+- Delete package
+
+Package use:
+- Assigned to customers.
+- Used for monthly recharge amount.
+- Used in billing summary.
+- Used with area package discounts.
+
+Database table:
+- packages
+
+
+6. Discounts
+------------
+
+The app supports discounts on packages.
+
+Discount types:
+- Percentage discount
+- Fixed PKR discount
+- Individual customer discount
+
+Area package discounts:
+- Discount can be configured for an area and package.
+- Sub-areas can inherit discount rules from parent areas.
+
+Individual customer discounts:
+- None
+- Percentage
+- Fixed PKR
+
+Billing behavior:
+- Billing summary shows discount rows only when a discount is actually applied.
+- If no discount is applied, discount rows are hidden.
+
+Database table:
+- area_package_discounts
+
+
+7. Dues and Due Ledger
+----------------------
+
+The dues system is ledger-based.
+
+Due charge categories:
+- Monthly recharge
+- Installation cost
+- Miscellaneous
+- Monthly / service manual
+- Balance carry
+- Other
+
+Due charge fields:
+- Customer
+- Amount
+- Amount remaining
+- Category
+- Recharge month / period label
+- Notes
+- Created date
+
+Dues screen features:
+- Area-wise dues filter.
+- Default filter is All areas.
+- Open due ledger for any customer.
+- View customers with outstanding balance.
+- Open due detail modal.
+- Receive payment.
+- Open due invoice / due statement.
+- WhatsApp reminder.
+
+Due detail modal:
+- Shows all due lines for customer.
+- Shows original amount.
+- Shows paid amount.
+- Shows outstanding amount.
+- Shows recharge month / period.
+- Shows notes.
+- Add manual due line.
+- Delete due line.
+
+Manual due lines:
+- Installation charges
+- Misc charges
+- Manual monthly/service charges
+- Other charges
+
+
+8. Installation and Misc Charges
+--------------------------------
+
+Customer add/edit form supports multiple extra charge rows.
+
+Extra charge row fields:
+- Type
+- Amount
+- Period label
+- Notes
+
+Supported types:
+- Installation cost
+- Miscellaneous
+- Monthly / service manual
+- Other
+
+Behavior:
+- Click Add charge row to add multiple charges.
+- Rows with amount greater than 0 are saved to the dues ledger.
+- Extra charges can be added for new customers.
+- Extra charges can also be added later for existing customers.
+- Customer due amount recalculates after extra due lines are saved.
+
+
+9. Recharges
+------------
+
+Recharge means adding the monthly package price to the customer's dues.
+
+Recharge fields:
+- Recharge date
+- Package expiry date, calculated automatically
+- Monthly package amount after discounts
+
+Recharge behavior:
+- Recharge date decides the invoice month.
+- Package expiry becomes same day next month from recharge date.
+- Old expiry is not used for recharge calculation.
+- Monthly fee is added to dues.
+- A monthly_recharge due line is added.
+- Recharge invoice is generated.
+
+Advance credit behavior:
+- If customer has negative due amount, it means advance credit.
+- On next recharge, advance credit is applied against the new monthly charge.
+- Example: customer has -200 credit and monthly recharge is 1000, new due becomes 800.
+
+
+10. Receive Payment / Collection
+--------------------------------
+
+Receive payment reduces customer dues.
+
+Payment fields:
+- Receive date
+- Amount received
+- Payment method
+- Transaction ID
+- Notes
+
+Payment behavior:
+- Payment is recorded in payments table.
+- Payment is allocated to due lines using FIFO order.
+- Oldest due lines are paid first.
+- Partial payments are supported.
+- Full payments are supported.
+- Overpayments are supported as advance credit.
+
+Advance payment example:
+- Outstanding balance: PKR 2000
+- Payment received: PKR 2200
+- New customer balance: PKR -200
+- Negative balance means customer has advance credit.
+
+Duplicate payment protection:
+- Record Payment button locks after first click.
+- Double/triple clicking does not post duplicate payments.
+- Button shows Saving while the payment is being saved.
+
+Duplicate transaction warning:
+- Warns if the same Transaction ID already exists.
+- Warns if same customer, same date, same amount, and same payment method already exists.
+- User can allow duplicate or cancel it.
+
+Delete payment:
+- Payment transactions can be deleted from customer profile and collection view.
+- Deleting a payment restores allocated due amounts.
+- Customer balance recalculates after delete.
+
+Database tables:
+- payments
+- payment_due_allocations
+
+
+11. Collection
+--------------
+
+Collection screen shows received payments grouped by date.
+
+Collection features:
+- Payments grouped by collection date.
+- Day total shown.
+- Payment rows show invoice, customer, User ID, paid amount, method, partial status.
+- Delete payment record option.
+
+
+12. Invoices and Statements
+---------------------------
+
+Invoice types:
+- Recharge invoice
+- Payment receipt
+- Billing summary
+- Due statement
+
+Due statement:
+- Shows all monthly recharge lines.
+- Shows all installation/misc/other due lines.
+- Shows charges.
+- Shows payments received.
+- Shows outstanding balance.
+- Shows payment receipts separately.
+- Shows total payments received.
+- Shows final outstanding balance.
+
+Important behavior:
+- If customer has outstanding dues, the Customers invoice icon opens Due statement.
+- If customer has no outstanding dues, the Customers invoice icon opens Billing summary.
+- This prevents installation-only dues from showing monthly package charges.
+
+Billing summary:
+- Shows package base price.
+- Shows discount rows only when discount is applied.
+- Shows final monthly price.
+- Shows existing due.
+- Shows total if renewing now.
+
+Payment receipt:
+- Shows payment date.
+- Shows outstanding before payment.
+- Shows amount received.
+- Shows outstanding after payment.
+
+Recharge invoice:
+- Shows monthly fee added to dues.
+- Shows previous dues.
+- Shows new total dues.
+- Shows old package expiry.
+- Shows new package expiry.
+- Shows recharge month.
+
+PDF and WhatsApp:
+- Invoice can be downloaded as PDF.
+- Invoice PDF can be shared through WhatsApp where supported.
+
+
+13. Reports
+-----------
+
+Reports screen supports date range previews and exports.
+
+Reports include:
+- Collection report
+- Customers report
+- Expiry report
+- Due report
+- Individual customer report
+
+Report formats:
+- CSV export
+- PDF export
+
+Collection report:
+- Date
+- Invoice
+- Customer
+- User ID
+- Paid amount
+- Payment method
+- Partial status
+
+Customer report:
+- User ID
+- Full name
+- Phone
+- Area
+- Package
+- Expiry
+- Due
+- Status
+
+Expiry report:
+- Customers expiring in selected date range.
+
+Due report:
+- Customers with due balances.
+
+Individual customer report:
+- Customer profile
+- Due lines
+- Payments
+- Package information
+- Due total
+
+
+14. Settings
+------------
+
+Settings sections:
+- Payment methods
+- Areas
+- Discounts
+
+Payment methods:
+- Add method name.
+- Add method type, such as cash, wallet, bank, or other.
+- Delete method.
+
+Areas:
+- Add main area.
+- Add sub-area.
+- Delete area.
+
+Discounts:
+- Add package discount by area and package.
+- Edit discount.
+- Delete discount.
+
+
+15. Database Structure
+----------------------
+
+Main tables:
+- users
+- areas
+- packages
+- area_package_discounts
+- payment_methods
+- customers
+- payments
+- customer_due_charges
+- payment_due_allocations
+
+customers table stores:
+- Customer identity and contact information.
+- Area and package references.
+- Installation and expiry dates.
+- Due amount, including negative advance credit.
+- Individual discount.
+- Status.
+
+payments table stores:
+- Customer payment records.
+- Payment method.
+- Total amount.
+- Paid amount.
+- Payment date.
+- Old and new expiry dates.
+- Recharge month label.
+- Transaction ID.
+- Notes.
+- Invoice number.
+- Partial/completed status.
+
+customer_due_charges table stores:
+- Every due line separately.
+- Monthly recharge dues.
+- Installation dues.
+- Misc dues.
+- Remaining amount per due line.
+
+payment_due_allocations table stores:
+- Which payment paid which due line.
+- Amount allocated per due line.
+
+
+16. Balance Rules
+-----------------
+
+Positive due amount:
+- Customer owes money.
+
+Zero due amount:
+- Customer has no outstanding balance.
+
+Negative due amount:
+- Customer has advance credit.
+
+Payment allocation:
+- Payment first clears due lines.
+- Extra payment becomes advance credit.
+
+Recharge with advance credit:
+- Advance credit reduces the new recharge due.
+
+Delete payment:
+- Due line amounts are restored.
+- Customer due amount is recalculated.
+
+
+17. UI and Styling
+------------------
+
+The UI includes:
+- Dark dashboard theme.
+- Sidebar navigation.
+- Cards for stats and sections.
+- Styled tables.
+- Modal windows.
+- Toast messages.
+- Invoice styling with readable table headers.
+- Responsive layout for smaller screens.
+
+Main navigation:
+- Dashboard
+- Customers
+- Dues
+- Collection
+- Packages
+- Reports
+- Settings
+
+
+18. Safety and Validation
+-------------------------
+
+Implemented safety features:
+- Required customer fields validation.
+- Positive amount validation for dues and payments.
+- Payment method required when receiving payment.
+- Duplicate payment warning.
+- Duplicate transaction ID warning.
+- Payment submit lock to stop double/triple posting.
+- Delete confirmations.
+- Date validation.
+- Missing DOM element guards so one missing element does not stop the full dashboard.
+
+
+19. Common Workflows
+--------------------
+
+Add a customer:
+1. Open Customers.
+2. Click Add customer.
+3. Enter User ID, name, phone, sub-area, package, install date, expiry date.
+4. Add installation/misc charges if needed.
+5. Save.
+
+Recharge a customer:
+1. Open Customers.
+2. Click Recharge.
+3. Select recharge date.
+4. Save recharge.
+5. Recharge invoice opens.
+
+Receive a payment:
+1. Open Customers or Dues.
+2. Click Receive payment.
+3. Enter amount, date, method, transaction ID if available.
+4. Save payment.
+5. Payment receipt opens.
+
+View customer full history:
+1. Open Customers.
+2. Search customer.
+3. Click View.
+4. See profile, dues, and transactions.
+
+Delete a transaction:
+1. Open customer View or Collection.
+2. Click Delete on the payment transaction.
+3. Confirm deletion.
+4. Customer balance updates.
+
+Reset customer expiry:
+1. Open Customers.
+2. Click View.
+3. Click Reset expiry from install date.
+4. Confirm.
+5. Expiry becomes install date plus one month.
+
+Open due statement:
+1. Open Dues or Customers.
+2. Click Due invoice / invoice icon when customer has dues.
+3. Due statement opens with charges, payments, and outstanding balance.
+
+
+20. Notes
+---------
+
+- Amounts are shown in PKR.
+- Customer area assignment is intended to use sub-areas.
+- Main areas are used for organizing sub-areas and discount inheritance.
+- Negative due amount means advance credit.
+- Due statements do not add monthly package charges unless a monthly recharge due line exists.
+- Billing summary is a quote/summary and may show monthly package price only when customer has no due and user opens billing summary.
+
+End of Document
