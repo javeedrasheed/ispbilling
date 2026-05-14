@@ -400,6 +400,7 @@
                     <th>Amount</th>
                     <th>Received by</th>
                     <th>Notes</th>
+                    <th class="no-print">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="tbodyAgentReceipts"></tbody>
@@ -929,6 +930,44 @@
             <button class="btn primary" type="button" id="btnSaveUserAccount">
               <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
               Save account
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="modalAgentReceiptEdit" class="modal-backdrop no-print" role="dialog" aria-modal="true" hidden>
+      <div class="modal">
+        <div class="modal header">
+          <strong>Edit agent handover record</strong>
+          <button class="icon-btn" type="button" data-close="modalAgentReceiptEdit" aria-label="Close">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="modal body">
+          <input id="agentReceiptEditId" type="hidden" />
+          <div class="form-grid">
+            <div class="field">
+              <label for="agentReceiptEditAgent">Agent</label>
+              <select id="agentReceiptEditAgent"></select>
+            </div>
+            <div class="field">
+              <label for="agentReceiptEditAmount">Amount received</label>
+              <input id="agentReceiptEditAmount" type="number" step="0.01" min="0.01" />
+            </div>
+            <div class="field">
+              <label for="agentReceiptEditDate">Received date</label>
+              <input id="agentReceiptEditDate" type="date" />
+            </div>
+            <div class="field full">
+              <label for="agentReceiptEditNotes">Notes</label>
+              <input id="agentReceiptEditNotes" type="text" />
+            </div>
+          </div>
+          <div class="actions-row end">
+            <button class="btn primary" type="button" id="btnUpdateAgentReceipt">
+              <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+              Save handover record
             </button>
           </div>
         </div>
