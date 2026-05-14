@@ -11,6 +11,7 @@
     payments: [],
     agentCollectionReceipts: [],
     agentAreaAccess: [],
+    userPermissions: [],
     dueCharges: [],
     paymentAllocations: [],
     cashAccounts: [],
@@ -47,7 +48,9 @@
   }
 
   function currentRole() {
-    return (state.currentUser && state.currentUser.role) || "";
+    return String((state.currentUser && state.currentUser.role) || "")
+      .trim()
+      .toLowerCase();
   }
 
   function isCollector() {
@@ -59,9 +62,19 @@
     return r === "admin" || r === "manager";
   }
 
+  function isStrictAdmin() {
+    return currentRole() === "admin";
+  }
+
   function requireAdminAction() {
     if (isAdminUser()) return true;
     toast("You do not have permission for this action.", "err");
+    return false;
+  }
+
+  function requireStrictAdminAction() {
+    if (isStrictAdmin()) return true;
+    toast("Only admin accounts can do this action.", "err");
     return false;
   }
 
@@ -1628,6 +1641,7 @@
       payRes,
       acrRes,
       aaaRes,
+      permRes,
       dcRes,
       pdaRes,
       cashAcctRes,
@@ -1654,6 +1668,7 @@
         .order("payment_date", { ascending: false }),
       sb.from("agent_collection_receipts").select("*").order("received_date", { ascending: false }),
       sb.from("agent_area_access").select("*"),
+      sb.from("user_permissions").select("*"),
       sb.from("customer_due_charges").select("*").order("created_at", { ascending: true }),
       sb.from("payment_due_allocations").select("*"),
       sb.from("cash_accounts").select("*").order("account_name"),
@@ -1691,6 +1706,12 @@
       console.warn(aaaRes.error);
     } else {
       state.agentAreaAccess = aaaRes.data || [];
+    }
+    if (permRes.error) {
+      state.userPermissions = [];
+      console.warn(permRes.error);
+    } else {
+      state.userPermissions = permRes.data || [];
     }
     if (dcRes.error) {
       state.dueCharges = [];
@@ -2411,12 +2432,113 @@
       .join("");
   }
 
+  function renderUserPermissions() {
+    const tb = $("tbodyUserPermissions");
+    if (!tb) return;
+    if (!isStrictAdmin()) {
+      tb.innerHTML = '<tr><td colspan="5" class="muted">Only admin accounts can manage permissions.</td></tr>';
+      return;
+    }
+    const rows = state.users || [];
+    tb.innerHTML = rows.length
+      ? rows
+          .map(function (u) {
+            const isAdmin = u.role === "admin";
+            const p = userPermissionRow(u.id, "cashflow") || {};
+            const viewChecked = isAdmin || p.can_view === true;
+            const editChecked = isAdmin || p.can_edit === true;
+            const delChecked = isAdmin || p.can_delete === true;
+            const disabled = isAdmin ? " disabled" : "";
+            return (
+              "<tr><td>" +
+              escapeHtml((u.full_name || u.username || "User") + " (" + (u.username || "") + ")") +
+              "</td><td>" +
+              escapeHtml(roleDisplayName(u.role)) +
+              "</td><td class='td-num'>" +
+              '<input type="checkbox" data-perm-view="' +
+              escapeHtml(u.id) +
+              '"' +
+              (viewChecked ? " checked" : "") +
+              disabled +
+              " />" +
+              "</td><td class='td-num'>" +
+              '<input type="checkbox" data-perm-edit="' +
+              escapeHtml(u.id) +
+              '"' +
+              (editChecked ? " checked" : "") +
+              disabled +
+              " />" +
+              "</td><td class='td-num'>" +
+              '<input type="checkbox" data-perm-delete="' +
+              escapeHtml(u.id) +
+              '"' +
+              (delChecked ? " checked" : "") +
+              disabled +
+              " />" +
+              "</td></tr>"
+            );
+          })
+          .join("")
+      : '<tr><td colspan="5" class="muted">No users found.</td></tr>';
+  }
+
   function labelFromCode(code) {
     return String(code || "")
       .replace(/_/g, " ")
       .replace(/\b\w/g, function (m) {
         return m.toUpperCase();
       });
+  }
+
+  function userPermissionRow(userId, key) {
+    return (state.userPermissions || []).find(function (p) {
+      return p.user_id === userId && p.permission_key === key;
+    });
+  }
+
+  function currentUserPermission(key, action) {
+    if (isStrictAdmin()) return true;
+    const uid = state.currentUser && state.currentUser.id;
+    if (!uid) return false;
+    const p = userPermissionRow(uid, key);
+    if (!p) return false;
+    if (action === "delete") return p.can_delete === true;
+    if (action === "edit") return p.can_edit === true;
+    return p.can_view === true;
+  }
+
+  function canCashFlowView() {
+    return isStrictAdmin() || currentRole() === "manager" || currentUserPermission("cashflow", "view");
+  }
+
+  function canCashFlowCreate() {
+    return isStrictAdmin() || currentRole() === "manager" || currentUserPermission("cashflow", "edit");
+  }
+
+  function canCashFlowEdit() {
+    return isStrictAdmin() || currentUserPermission("cashflow", "edit");
+  }
+
+  function canCashFlowDelete() {
+    return currentUserPermission("cashflow", "delete");
+  }
+
+  function requireCashFlowEdit() {
+    if (canCashFlowEdit()) return true;
+    toast("You do not have Cash Flow edit permission.", "err");
+    return false;
+  }
+
+  function requireCashFlowCreate() {
+    if (canCashFlowCreate()) return true;
+    toast("You do not have Cash Flow entry permission.", "err");
+    return false;
+  }
+
+  function requireCashFlowDelete() {
+    if (canCashFlowDelete()) return true;
+    toast("You do not have Cash Flow delete permission.", "err");
+    return false;
   }
 
   function cashAccountById(id) {
@@ -2492,6 +2614,17 @@
 
     const accounts = state.cashAccounts || [];
     const txns = state.cashTransactions || [];
+    const canCreate = canCashFlowCreate();
+    const canEdit = canCashFlowEdit();
+    const canDel = canCashFlowDelete();
+    ["btnSaveCashAccount", "btnSaveEmployee"].forEach(function (id) {
+      const el = $(id);
+      if (el) el.disabled = !canEdit;
+    });
+    ["btnSaveCashIncome", "btnSaveExpense", "btnSaveSalary", "btnSaveMaterial", "btnSaveWage"].forEach(function (id) {
+      const el = $(id);
+      if (el) el.disabled = !canCreate;
+    });
     const income = txns.reduce(function (sum, t) {
       return sum + (t.transaction_type === "income" ? Number(t.amount || 0) : 0);
     }, 0);
@@ -2510,6 +2643,17 @@
       tbAccounts.innerHTML = accounts.length
         ? accounts
             .map(function (a) {
+              const actions =
+                (canEdit
+                  ? '<button class="btn ghost" type="button" data-cash-account-edit="' +
+                    escapeHtml(a.id) +
+                    '">Edit</button> '
+                  : "") +
+                (canDel
+                  ? '<button class="btn danger" type="button" data-cash-account-del="' +
+                    escapeHtml(a.id) +
+                    '">Delete</button>'
+                  : "");
               return (
                 "<tr><td>" +
                 escapeHtml(a.account_name) +
@@ -2519,11 +2663,13 @@
                 formatPKR(a.opening_balance) +
                 "</td><td class='td-num'><strong>" +
                 formatPKR(cashAccountBalance(a.id)) +
-                "</strong></td></tr>"
+                "</strong></td><td class='no-print'>" +
+                (actions || '<span class="muted">—</span>') +
+                "</td></tr>"
               );
             })
             .join("")
-        : '<tr><td colspan="4" class="muted">No cash accounts yet.</td></tr>';
+        : '<tr><td colspan="5" class="muted">No cash accounts yet.</td></tr>';
     }
 
     const tbEmp = $("tbodyEmployees");
@@ -2532,6 +2678,17 @@
       tbEmp.innerHTML = employees.length
         ? employees
             .map(function (e) {
+              const actions =
+                (canEdit
+                  ? '<button class="btn ghost" type="button" data-employee-edit="' +
+                    escapeHtml(e.id) +
+                    '">Edit</button> '
+                  : "") +
+                (canDel
+                  ? '<button class="btn danger" type="button" data-employee-del="' +
+                    escapeHtml(e.id) +
+                    '">Delete</button>'
+                  : "");
               return (
                 "<tr><td>" +
                 escapeHtml(e.full_name) +
@@ -2539,11 +2696,13 @@
                 escapeHtml(e.designation || "—") +
                 "</td><td class='td-num'>" +
                 formatPKR(e.salary_amount) +
+                "</td><td class='no-print'>" +
+                (actions || '<span class="muted">—</span>') +
                 "</td></tr>"
               );
             })
             .join("")
-        : '<tr><td colspan="3" class="muted">No employees yet.</td></tr>';
+        : '<tr><td colspan="4" class="muted">No employees yet.</td></tr>';
     }
 
     const tbTx = $("tbodyCashTransactions");
@@ -2553,6 +2712,24 @@
             .slice(0, 80)
             .map(function (t) {
               const sign = t.transaction_type === "income" ? "+" : "-";
+              const salaryInvoice =
+                t.source_type === "salary_record" && t.source_id
+                  ? '<button class="btn ghost" type="button" data-salary-invoice="' +
+                    escapeHtml(t.source_id) +
+                    '">Invoice</button> '
+                  : "";
+              const actions =
+                salaryInvoice +
+                (canEdit
+                  ? '<button class="btn ghost" type="button" data-cash-txn-edit="' +
+                    escapeHtml(t.id) +
+                    '">Edit</button> '
+                  : "") +
+                (canDel
+                  ? '<button class="btn danger" type="button" data-cash-txn-del="' +
+                    escapeHtml(t.id) +
+                    '">Delete</button>'
+                  : "");
               return (
                 "<tr><td>" +
                 escapeHtml(formatDisplayDate(t.transaction_date)) +
@@ -2568,11 +2745,13 @@
                 sign +
                 " " +
                 formatPKR(t.amount) +
-                "</strong></td></tr>"
+                "</strong></td><td class='no-print'>" +
+                (actions || '<span class="muted">—</span>') +
+                "</td></tr>"
               );
             })
             .join("")
-        : '<tr><td colspan="6" class="muted">No cash transactions yet.</td></tr>';
+        : '<tr><td colspan="7" class="muted">No cash transactions yet.</td></tr>';
     }
   }
 
@@ -2616,7 +2795,7 @@
   }
 
   async function saveCashAccount() {
-    if (!requireAdminAction()) return;
+    if (!requireCashFlowEdit()) return;
     const name = ($("cashAccountName") && $("cashAccountName").value.trim()) || "";
     const type = ($("cashAccountType") && $("cashAccountType").value) || "cash_in_hand";
     const opening = Number(($("cashOpeningBalance") && $("cashOpeningBalance").value) || 0);
@@ -2643,7 +2822,7 @@
   }
 
   async function saveCashIncome() {
-    if (!requireAdminAction()) return;
+    if (!requireCashFlowCreate()) return;
     const accountId = $("cashIncomeAccount") && $("cashIncomeAccount").value;
     const amount = Number(($("cashIncomeAmount") && $("cashIncomeAmount").value) || 0);
     const date = ($("cashIncomeDate") && $("cashIncomeDate").value) || todayISODate();
@@ -2674,7 +2853,7 @@
   }
 
   async function saveExpenseRecord() {
-    if (!requireAdminAction()) return;
+    if (!requireCashFlowCreate()) return;
     const accountId = $("expenseAccount") && $("expenseAccount").value;
     const amount = Number(($("expenseAmount") && $("expenseAmount").value) || 0);
     const date = ($("expenseDate") && $("expenseDate").value) || todayISODate();
@@ -2723,7 +2902,7 @@
   }
 
   async function saveEmployeeRecord() {
-    if (!requireAdminAction()) return;
+    if (!requireCashFlowEdit()) return;
     const name = ($("empName") && $("empName").value.trim()) || "";
     if (!name) {
       toast("Enter employee name.", "err");
@@ -2749,7 +2928,7 @@
   }
 
   async function saveSalaryRecord() {
-    if (!requireAdminAction()) return;
+    if (!requireCashFlowCreate()) return;
     const employeeId = $("salaryEmployee") && $("salaryEmployee").value;
     const accountId = $("salaryAccount") && $("salaryAccount").value;
     const amount = Number(($("salaryAmount") && $("salaryAmount").value) || 0);
@@ -2803,7 +2982,7 @@
   }
 
   async function saveMaterialPurchase() {
-    if (!requireAdminAction()) return;
+    if (!requireCashFlowCreate()) return;
     const accountId = $("materialAccount") && $("materialAccount").value;
     const name = ($("materialName") && $("materialName").value.trim()) || "";
     const qty = Number(($("materialQty") && $("materialQty").value) || 1);
@@ -2858,7 +3037,7 @@
   }
 
   async function saveDailyWageRecord() {
-    if (!requireAdminAction()) return;
+    if (!requireCashFlowCreate()) return;
     const accountId = $("wageAccount") && $("wageAccount").value;
     const worker = ($("wageWorker") && $("wageWorker").value.trim()) || "";
     const workType = ($("wageWorkType") && $("wageWorkType").value.trim()) || "";
@@ -2906,18 +3085,348 @@
     await refresh();
   }
 
+  function employeeById(id) {
+    return (state.employees || []).find(function (e) {
+      return e.id === id;
+    });
+  }
+
+  function salaryRecordById(id) {
+    return (state.salaryRecords || []).find(function (s) {
+      return s.id === id;
+    });
+  }
+
+  function cashTransactionById(id) {
+    return (state.cashTransactions || []).find(function (t) {
+      return t.id === id;
+    });
+  }
+
+  function openCashAccountEditModal(accountId) {
+    if (!requireCashFlowEdit()) return;
+    const a = cashAccountById(accountId);
+    if (!a) {
+      toast("Cash account not found.", "err");
+      return;
+    }
+    if ($("cashEditId")) $("cashEditId").value = a.id;
+    if ($("cashEditName")) $("cashEditName").value = a.account_name || "";
+    if ($("cashEditType")) $("cashEditType").value = a.account_type || "cash_in_hand";
+    if ($("cashEditOpening")) $("cashEditOpening").value = String(Number(a.opening_balance || 0));
+    if ($("cashEditActive")) $("cashEditActive").value = a.is_active === false ? "false" : "true";
+    openBackdrop($("modalCashAccountEdit"));
+  }
+
+  async function updateCashAccountRecord() {
+    if (!requireCashFlowEdit()) return;
+    const id = $("cashEditId") ? $("cashEditId").value : "";
+    const name = ($("cashEditName") && $("cashEditName").value.trim()) || "";
+    if (!id || !name) {
+      toast("Enter cash account name.", "err");
+      return;
+    }
+    const res = await getClient()
+      .from("cash_accounts")
+      .update({
+        account_name: name,
+        account_type: ($("cashEditType") && $("cashEditType").value) || "cash_in_hand",
+        opening_balance: roundMoney(Number(($("cashEditOpening") && $("cashEditOpening").value) || 0)),
+        is_active: (($("cashEditActive") && $("cashEditActive").value) || "true") === "true"
+      })
+      .eq("id", id);
+    if (res.error) {
+      toast(res.error.message, "err");
+      return;
+    }
+    closeBackdrop($("modalCashAccountEdit"));
+    toast("Cash account updated.", "ok");
+    await refresh();
+  }
+
+  async function deleteCashAccountRecord(accountId) {
+    if (!requireCashFlowDelete()) return;
+    const a = cashAccountById(accountId);
+    if (!a) return;
+    const hasTx = (state.cashTransactions || []).some(function (t) {
+      return t.account_id === accountId;
+    });
+    const msg = hasTx
+      ? "This account has transactions. It will be deactivated to preserve history. Continue?"
+      : "Delete this cash account?";
+    if (!window.confirm(msg)) return;
+    const res = hasTx
+      ? await getClient().from("cash_accounts").update({ is_active: false }).eq("id", accountId)
+      : await getClient().from("cash_accounts").delete().eq("id", accountId);
+    if (res.error) {
+      toast(res.error.message, "err");
+      return;
+    }
+    toast(hasTx ? "Cash account deactivated." : "Cash account deleted.", "ok");
+    await refresh();
+  }
+
+  function openEmployeeEditModal(employeeId) {
+    if (!requireCashFlowEdit()) return;
+    const e = employeeById(employeeId);
+    if (!e) {
+      toast("Employee not found.", "err");
+      return;
+    }
+    if ($("employeeEditId")) $("employeeEditId").value = e.id;
+    if ($("employeeEditName")) $("employeeEditName").value = e.full_name || "";
+    if ($("employeeEditPhone")) $("employeeEditPhone").value = e.phone || "";
+    if ($("employeeEditDesignation")) $("employeeEditDesignation").value = e.designation || "";
+    if ($("employeeEditSalary")) $("employeeEditSalary").value = String(Number(e.salary_amount || 0));
+    if ($("employeeEditActive")) $("employeeEditActive").value = e.is_active === false ? "false" : "true";
+    openBackdrop($("modalEmployeeEdit"));
+  }
+
+  async function updateEmployeeRecord() {
+    if (!requireCashFlowEdit()) return;
+    const id = $("employeeEditId") ? $("employeeEditId").value : "";
+    const name = ($("employeeEditName") && $("employeeEditName").value.trim()) || "";
+    if (!id || !name) {
+      toast("Enter employee name.", "err");
+      return;
+    }
+    const res = await getClient()
+      .from("employees")
+      .update({
+        full_name: name,
+        phone: ($("employeeEditPhone") && $("employeeEditPhone").value.trim()) || null,
+        designation: ($("employeeEditDesignation") && $("employeeEditDesignation").value.trim()) || null,
+        salary_amount: roundMoney(Number(($("employeeEditSalary") && $("employeeEditSalary").value) || 0)),
+        is_active: (($("employeeEditActive") && $("employeeEditActive").value) || "true") === "true"
+      })
+      .eq("id", id);
+    if (res.error) {
+      toast(res.error.message, "err");
+      return;
+    }
+    closeBackdrop($("modalEmployeeEdit"));
+    toast("Employee updated.", "ok");
+    await refresh();
+  }
+
+  async function deleteEmployeeRecord(employeeId) {
+    if (!requireCashFlowDelete()) return;
+    const e = employeeById(employeeId);
+    if (!e) return;
+    const hasSalary = (state.salaryRecords || []).some(function (s) {
+      return s.employee_id === employeeId;
+    });
+    const msg = hasSalary
+      ? "This employee has salary records. The employee will be deactivated to preserve salary history. Continue?"
+      : "Delete this employee?";
+    if (!window.confirm(msg)) return;
+    const res = hasSalary
+      ? await getClient().from("employees").update({ is_active: false }).eq("id", employeeId)
+      : await getClient().from("employees").delete().eq("id", employeeId);
+    if (res.error) {
+      toast(res.error.message, "err");
+      return;
+    }
+    toast(hasSalary ? "Employee deactivated." : "Employee deleted.", "ok");
+    await refresh();
+  }
+
+  function openCashTransactionEditModal(txnId) {
+    if (!requireCashFlowEdit()) return;
+    const t = cashTransactionById(txnId);
+    if (!t) {
+      toast("Cash transaction not found.", "err");
+      return;
+    }
+    buildCashAccountOptions($("cashTxnEditAccount"), true);
+    if ($("cashTxnEditId")) $("cashTxnEditId").value = t.id;
+    if ($("cashTxnEditAccount")) $("cashTxnEditAccount").value = t.account_id || "";
+    if ($("cashTxnEditType")) $("cashTxnEditType").value = t.transaction_type || "expense";
+    if ($("cashTxnEditCategory")) $("cashTxnEditCategory").value = t.category || "";
+    if ($("cashTxnEditAmount")) $("cashTxnEditAmount").value = String(Number(t.amount || 0));
+    if ($("cashTxnEditDate")) $("cashTxnEditDate").value = String(t.transaction_date || "").slice(0, 10) || todayISODate();
+    if ($("cashTxnEditDesc")) $("cashTxnEditDesc").value = t.description || "";
+    openBackdrop($("modalCashTxnEdit"));
+  }
+
+  async function syncCashTransactionSource(sb, original, patch) {
+    if (!original || !original.source_type || !original.source_id) return;
+    const id = original.source_id;
+    if (original.source_type === "expense_record") {
+      await sb.from("expense_records").update({
+        account_id: patch.account_id,
+        expense_type: patch.category,
+        amount: patch.amount,
+        expense_date: patch.transaction_date,
+        description: patch.description || null
+      }).eq("id", id);
+    } else if (original.source_type === "salary_record") {
+      await sb.from("salary_records").update({
+        account_id: patch.account_id,
+        amount: patch.amount,
+        paid_date: patch.transaction_date,
+        notes: patch.description || null
+      }).eq("id", id);
+    } else if (original.source_type === "material_purchase") {
+      await sb.from("material_purchases").update({
+        account_id: patch.account_id,
+        total_amount: patch.amount,
+        purchase_date: patch.transaction_date,
+        notes: patch.description || null
+      }).eq("id", id);
+    } else if (original.source_type === "daily_wage_record") {
+      await sb.from("daily_wage_records").update({
+        account_id: patch.account_id,
+        amount: patch.amount,
+        work_date: patch.transaction_date,
+        notes: patch.description || null
+      }).eq("id", id);
+    } else if (original.source_type === "agent_collection_receipt") {
+      await sb.from("agent_collection_receipts").update({
+        amount: patch.amount,
+        received_date: patch.transaction_date,
+        notes: patch.description || null
+      }).eq("id", id);
+    }
+  }
+
+  async function updateCashTransactionRecord() {
+    if (!requireCashFlowEdit()) return;
+    const id = $("cashTxnEditId") ? $("cashTxnEditId").value : "";
+    const original = cashTransactionById(id);
+    const accountId = $("cashTxnEditAccount") ? $("cashTxnEditAccount").value : "";
+    const amount = Number(($("cashTxnEditAmount") && $("cashTxnEditAmount").value) || 0);
+    const date = ($("cashTxnEditDate") && $("cashTxnEditDate").value) || todayISODate();
+    const category = ($("cashTxnEditCategory") && $("cashTxnEditCategory").value.trim()) || "other";
+    if (!original) {
+      toast("Cash transaction not found.", "err");
+      return;
+    }
+    if (!requireCashAccount(accountId)) return;
+    if (!(amount > 0)) {
+      toast("Enter a positive amount.", "err");
+      return;
+    }
+    if (!parseISODateLocal(date)) {
+      toast("Select a valid transaction date.", "err");
+      return;
+    }
+    const patch = {
+      account_id: accountId,
+      transaction_type: ($("cashTxnEditType") && $("cashTxnEditType").value) || "expense",
+      category: category,
+      amount: roundMoney(amount),
+      transaction_date: date,
+      description: ($("cashTxnEditDesc") && $("cashTxnEditDesc").value.trim()) || null
+    };
+    const sb = getClient();
+    const res = await sb.from("cash_transactions").update(patch).eq("id", id);
+    if (res.error) {
+      toast(res.error.message, "err");
+      return;
+    }
+    try {
+      await syncCashTransactionSource(sb, original, patch);
+    } catch (e) {
+      console.warn(e);
+    }
+    closeBackdrop($("modalCashTxnEdit"));
+    toast("Cash transaction updated.", "ok");
+    await refresh();
+  }
+
+  async function deleteLinkedCashSource(sb, t) {
+    if (!t || !t.source_type || !t.source_id) return;
+    if (t.source_type === "expense_record") {
+      await sb.from("expense_records").delete().eq("id", t.source_id);
+    } else if (t.source_type === "salary_record") {
+      await sb.from("salary_records").delete().eq("id", t.source_id);
+    } else if (t.source_type === "material_purchase") {
+      await sb.from("material_purchases").delete().eq("id", t.source_id);
+    } else if (t.source_type === "daily_wage_record") {
+      await sb.from("daily_wage_records").delete().eq("id", t.source_id);
+    }
+  }
+
+  async function deleteCashTransactionRecord(txnId) {
+    if (!requireCashFlowDelete()) return;
+    const t = cashTransactionById(txnId);
+    if (!t) return;
+    if (!window.confirm("Delete this cash transaction? Linked salary/expense/material/wage records will also be removed.")) return;
+    const sb = getClient();
+    try {
+      await deleteLinkedCashSource(sb, t);
+    } catch (e) {
+      console.warn(e);
+    }
+    const res = await sb.from("cash_transactions").delete().eq("id", txnId);
+    if (res.error) {
+      toast(res.error.message, "err");
+      return;
+    }
+    toast("Cash transaction deleted.", "ok");
+    await refresh();
+  }
+
+  function buildSalaryInvoiceHtml(salaryId) {
+    const s = salaryRecordById(salaryId);
+    if (!s) return "";
+    const e = employeeById(s.employee_id) || {};
+    const lines = [];
+    lines.push("<h3>Salary payment receipt</h3>");
+    lines.push("<p class='muted'>Receipt: <strong>SAL-" + escapeHtml(String(s.id).slice(0, 8).toUpperCase()) + "</strong></p>");
+    lines.push("<hr/>");
+    lines.push("<p><strong>Employee:</strong> " + escapeHtml(e.full_name || "Employee") + "</p>");
+    lines.push("<p><strong>Designation:</strong> " + escapeHtml(e.designation || "—") + "</p>");
+    lines.push("<p><strong>Salary month:</strong> " + escapeHtml(s.salary_month || "—") + "</p>");
+    lines.push("<p><strong>Paid date:</strong> " + escapeHtml(formatDisplayDate(s.paid_date)) + "</p>");
+    lines.push("<p><strong>Paid from:</strong> " + escapeHtml(cashAccountLabel(s.account_id)) + "</p>");
+    lines.push("<table><thead><tr><th>Description</th><th class='td-num'>Amount</th></tr></thead><tbody>");
+    lines.push("<tr><td>Salary payment</td><td class='td-num'><strong>" + escapeHtml(formatPKR(s.amount)) + "</strong></td></tr>");
+    lines.push("</tbody></table>");
+    if (s.notes) lines.push("<p><strong>Notes:</strong> " + escapeHtml(s.notes) + "</p>");
+    lines.push("<p class='muted invoice-generated'>Generated on " + escapeHtml(formatDisplayDate(todayISODate())) + "</p>");
+    return lines.join("");
+  }
+
+  function openSalaryInvoice(salaryId) {
+    const html = buildSalaryInvoiceHtml(salaryId);
+    if (!html) {
+      toast("Salary record not found.", "err");
+      return;
+    }
+    state.invoiceContext = {
+      kind: "salary_receipt",
+      invoiceNo: "SAL-" + String(salaryId).slice(0, 8).toUpperCase(),
+      title: "Salary payment receipt"
+    };
+    const title = $("invoiceModalTitle");
+    const root = $("invoiceRoot");
+    if (title) title.textContent = "Salary payment receipt";
+    if (root) root.innerHTML = html;
+    openBackdrop($("modalInvoice"));
+  }
+
   function canAccessView(name) {
+    if (name === "cashflow") return canCashFlowView();
     if (!isCollector()) return true;
     return ["dashboard", "customers", "dues", "collection", "reports", "settings"].indexOf(name) !== -1;
   }
 
   function applyRolePermissions() {
     const collector = isCollector();
-    document.querySelectorAll('[data-view="packages"], [data-view="payments"], [data-view="areas"], [data-view="agents"], [data-view="cashflow"]').forEach(function (el) {
+    renderCreateAccountRoleOptions();
+    document.querySelectorAll('[data-view="packages"], [data-view="payments"], [data-view="areas"], [data-view="agents"]').forEach(function (el) {
       el.hidden = collector;
+    });
+    document.querySelectorAll('[data-view="cashflow"]').forEach(function (el) {
+      el.hidden = !canCashFlowView();
     });
     document.querySelectorAll(".admin-only").forEach(function (el) {
       el.hidden = !isAdminUser();
+    });
+    document.querySelectorAll(".strict-admin-only").forEach(function (el) {
+      el.hidden = !isStrictAdmin();
     });
     ["btnAddCustomer", "btnExportCustomers", "btnImportCustomers"].forEach(function (id) {
       const el = $(id);
@@ -2974,12 +3483,28 @@
     return role || "User";
   }
 
+  function renderCreateAccountRoleOptions() {
+    const sel = $("agentRole");
+    if (!sel) return;
+    const prev = sel.value || "collector";
+    const opts = ['<option value="collector">Collection agent</option>'];
+    if (isStrictAdmin()) {
+      opts.push('<option value="admin">Admin - full access</option>');
+      opts.push('<option value="manager">Manager - full access</option>');
+    }
+    sel.innerHTML = opts.join("");
+    sel.value = isStrictAdmin() && (prev === "admin" || prev === "manager") ? prev : "collector";
+  }
+
   async function createCollectionAgentAccount() {
     if (!requireAdminAction()) return;
     const username = ($("agentUsername") && $("agentUsername").value.trim()) || "";
     const fullName = ($("agentFullName") && $("agentFullName").value.trim()) || "";
     const email = ($("agentEmail") && $("agentEmail").value.trim()) || "";
-    const role = ($("agentRole") && $("agentRole").value) || "collector";
+    let role = ($("agentRole") && $("agentRole").value) || "collector";
+    if (!isStrictAdmin()) {
+      role = "collector";
+    }
     const password = ($("agentPassword") && $("agentPassword").value) || "";
     const confirmPassword = ($("agentConfirmPassword") && $("agentConfirmPassword").value) || "";
     if (!username || !fullName || !email || !password || !confirmPassword) {
@@ -3118,6 +3643,43 @@
       console.warn(areas.error);
     }
     toast("User account deactivated.", "ok");
+    await refresh();
+  }
+
+  async function saveUserPermissions() {
+    if (!requireStrictAdminAction()) return;
+    const sb = getClient();
+    const rows = (state.users || [])
+      .filter(function (u) {
+        return u.role !== "admin";
+      })
+      .map(function (u) {
+        const viewEl = document.querySelector('[data-perm-view="' + u.id + '"]');
+        const editEl = document.querySelector('[data-perm-edit="' + u.id + '"]');
+        const delEl = document.querySelector('[data-perm-delete="' + u.id + '"]');
+        const canEdit = editEl ? editEl.checked : false;
+        const canDelete = delEl ? delEl.checked : false;
+        return {
+          user_id: u.id,
+          permission_key: "cashflow",
+          can_view: viewEl ? viewEl.checked || canEdit || canDelete : false,
+          can_edit: canEdit,
+          can_delete: canDelete,
+          updated_at: new Date().toISOString()
+        };
+      });
+    if (!rows.length) {
+      toast("No permission rows to save.", "err");
+      return;
+    }
+    const res = await sb
+      .from("user_permissions")
+      .upsert(rows, { onConflict: "user_id,permission_key" });
+    if (res.error) {
+      toast(res.error.message + " Run supabase/migration_user_permissions.sql if this table is missing.", "err");
+      return;
+    }
+    toast("User permissions saved.", "ok");
     await refresh();
   }
 
@@ -4519,7 +5081,12 @@
   }
 
   function isPaymentReceiptContext(ctx) {
-    return !!ctx && ctx.kind === "receipt" && ctx.paymentMode === "receive";
+    return (
+      !!ctx &&
+      ((ctx.kind === "receipt" && ctx.paymentMode === "receive") ||
+        ctx.kind === "salary_receipt" ||
+        ctx.kind === "agent_handover")
+    );
   }
 
   async function buildExactVisibleInvoicePdfBlob() {
@@ -5281,6 +5848,7 @@
   async function refresh() {
     try {
       await loadAll();
+      applyRolePermissions();
       renderDashboard();
       renderCustomerFilters();
       renderCustomerPackageFilter();
@@ -5292,6 +5860,7 @@
       renderAreas();
       renderDiscounts();
       renderUsers();
+      renderUserPermissions();
       renderCollection();
       renderCashFlow();
       renderAgentsPanel();
@@ -7058,6 +7627,57 @@
     onIf("btnSaveSalary", "click", saveSalaryRecord);
     onIf("btnSaveMaterial", "click", saveMaterialPurchase);
     onIf("btnSaveWage", "click", saveDailyWageRecord);
+    onIf("btnUpdateCashAccount", "click", updateCashAccountRecord);
+    onIf("btnUpdateEmployee", "click", updateEmployeeRecord);
+    onIf("btnUpdateCashTxn", "click", updateCashTransactionRecord);
+    onIf("btnSaveUserPermissions", "click", saveUserPermissions);
+    const cashAccountsBody = $("tbodyCashAccounts");
+    if (cashAccountsBody) {
+      cashAccountsBody.addEventListener("click", async function (ev) {
+        const edit = ev.target.closest("[data-cash-account-edit]");
+        if (edit) {
+          openCashAccountEditModal(edit.getAttribute("data-cash-account-edit"));
+          return;
+        }
+        const del = ev.target.closest("[data-cash-account-del]");
+        if (del) {
+          await deleteCashAccountRecord(del.getAttribute("data-cash-account-del"));
+        }
+      });
+    }
+    const employeesBody = $("tbodyEmployees");
+    if (employeesBody) {
+      employeesBody.addEventListener("click", async function (ev) {
+        const edit = ev.target.closest("[data-employee-edit]");
+        if (edit) {
+          openEmployeeEditModal(edit.getAttribute("data-employee-edit"));
+          return;
+        }
+        const del = ev.target.closest("[data-employee-del]");
+        if (del) {
+          await deleteEmployeeRecord(del.getAttribute("data-employee-del"));
+        }
+      });
+    }
+    const cashTxBody = $("tbodyCashTransactions");
+    if (cashTxBody) {
+      cashTxBody.addEventListener("click", async function (ev) {
+        const inv = ev.target.closest("[data-salary-invoice]");
+        if (inv) {
+          openSalaryInvoice(inv.getAttribute("data-salary-invoice"));
+          return;
+        }
+        const edit = ev.target.closest("[data-cash-txn-edit]");
+        if (edit) {
+          openCashTransactionEditModal(edit.getAttribute("data-cash-txn-edit"));
+          return;
+        }
+        const del = ev.target.closest("[data-cash-txn-del]");
+        if (del) {
+          await deleteCashTransactionRecord(del.getAttribute("data-cash-txn-del"));
+        }
+      });
+    }
     ["materialQty", "materialUnitCost"].forEach(function (id) {
       const el = $(id);
       if (el) {
