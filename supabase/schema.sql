@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS public.customers (
     CHECK (individual_discount_type IN ('percentage', 'fixed', 'none')),
   individual_discount_value NUMERIC(12, 2) NOT NULL DEFAULT 0,
   status VARCHAR(20) NOT NULL DEFAULT 'active'
-    CHECK (status IN ('active', 'expired', 'inactive')),
+    CHECK (status IN ('active', 'expired', 'terminated', 'inactive')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS public.payments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   customer_id UUID NOT NULL REFERENCES public.customers (id) ON DELETE CASCADE,
   payment_method_id UUID REFERENCES public.payment_methods (id) ON DELETE SET NULL,
+  collected_by_user_id UUID REFERENCES public.users (id) ON DELETE SET NULL,
   total_amount NUMERIC(12, 2) NOT NULL,
   paid_amount NUMERIC(12, 2) NOT NULL,
   payment_date DATE NOT NULL DEFAULT (CURRENT_DATE),
@@ -92,6 +93,7 @@ CREATE INDEX IF NOT EXISTS idx_customers_status ON public.customers (status);
 CREATE INDEX IF NOT EXISTS idx_customers_expiry ON public.customers (package_expiry_date);
 CREATE INDEX IF NOT EXISTS idx_payments_customer ON public.payments (customer_id);
 CREATE INDEX IF NOT EXISTS idx_payments_date ON public.payments (payment_date);
+CREATE INDEX IF NOT EXISTS idx_payments_collected_by ON public.payments (collected_by_user_id);
 
 CREATE TABLE IF NOT EXISTS public.customer_due_charges (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -118,6 +120,30 @@ CREATE TABLE IF NOT EXISTS public.payment_due_allocations (
 CREATE INDEX IF NOT EXISTS idx_pda_payment ON public.payment_due_allocations (payment_id);
 CREATE INDEX IF NOT EXISTS idx_pda_charge ON public.payment_due_allocations (due_charge_id);
 
+CREATE TABLE IF NOT EXISTS public.agent_collection_receipts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_id UUID NOT NULL REFERENCES public.users (id) ON DELETE CASCADE,
+  received_by_user_id UUID REFERENCES public.users (id) ON DELETE SET NULL,
+  amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
+  received_date DATE NOT NULL DEFAULT (CURRENT_DATE),
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_collection_receipts_agent ON public.agent_collection_receipts (agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_collection_receipts_date ON public.agent_collection_receipts (received_date);
+
+CREATE TABLE IF NOT EXISTS public.agent_area_access (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_id UUID NOT NULL REFERENCES public.users (id) ON DELETE CASCADE,
+  area_id UUID NOT NULL REFERENCES public.areas (id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (agent_id, area_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_area_access_agent ON public.agent_area_access (agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_area_access_area ON public.agent_area_access (area_id);
+
 -- ---------------------------------------------------------------------------
 -- Row Level Security (permissive for anon — replace in production)
 -- ---------------------------------------------------------------------------
@@ -140,6 +166,10 @@ DROP POLICY IF EXISTS "due_charges_all_anon" ON public.customer_due_charges;
 DROP POLICY IF EXISTS "due_charges_all_authenticated" ON public.customer_due_charges;
 DROP POLICY IF EXISTS "pda_all_anon" ON public.payment_due_allocations;
 DROP POLICY IF EXISTS "pda_all_authenticated" ON public.payment_due_allocations;
+DROP POLICY IF EXISTS "acr_all_anon" ON public.agent_collection_receipts;
+DROP POLICY IF EXISTS "acr_all_authenticated" ON public.agent_collection_receipts;
+DROP POLICY IF EXISTS "aaa_all_anon" ON public.agent_area_access;
+DROP POLICY IF EXISTS "aaa_all_authenticated" ON public.agent_area_access;
 
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.areas ENABLE ROW LEVEL SECURITY;
@@ -150,6 +180,8 @@ ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.customer_due_charges ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payment_due_allocations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.agent_collection_receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.agent_area_access ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "users_all_anon" ON public.users FOR ALL TO anon USING (true) WITH CHECK (true);
 CREATE POLICY "users_all_authenticated" ON public.users FOR ALL TO authenticated USING (true) WITH CHECK (true);
@@ -177,6 +209,12 @@ CREATE POLICY "due_charges_all_authenticated" ON public.customer_due_charges FOR
 
 CREATE POLICY "pda_all_anon" ON public.payment_due_allocations FOR ALL TO anon USING (true) WITH CHECK (true);
 CREATE POLICY "pda_all_authenticated" ON public.payment_due_allocations FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY "acr_all_anon" ON public.agent_collection_receipts FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "acr_all_authenticated" ON public.agent_collection_receipts FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+CREATE POLICY "aaa_all_anon" ON public.agent_area_access FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "aaa_all_authenticated" ON public.agent_area_access FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 -- ---------------------------------------------------------------------------
 -- Seed data

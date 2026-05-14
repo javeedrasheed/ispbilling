@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ISP Billing — Dashboard</title>
+    <title>Lasbela Link — Dashboard</title>
     <link rel="stylesheet" href="css/style.css" />
     <link
       rel="stylesheet"
@@ -18,10 +18,17 @@
     <div class="app-shell">
       <aside class="sidebar no-print">
         <div class="brand">
-          <i class="fa-solid fa-tower-broadcast fa-lg brand-icon" aria-hidden="true"></i>
-          <div>
-            <h1>ISP Billing</h1>
-            <small>Management</small>
+          <div class="brand-mark" aria-hidden="true">
+            <span class="router-body"></span>
+            <span class="router-antenna antenna-left"></span>
+            <span class="router-antenna antenna-right"></span>
+            <span class="wifi-arc arc-1"></span>
+            <span class="wifi-arc arc-2"></span>
+            <span class="router-light"></span>
+          </div>
+          <div class="brand-copy">
+            <h1>Lasbela Link</h1>
+            <small>ISP Billing Management</small>
           </div>
         </div>
 
@@ -54,6 +61,10 @@
             <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
             Areas
           </button>
+          <button type="button" data-view="agents">
+            <i class="fa-solid fa-user-shield" aria-hidden="true"></i>
+            Agents
+          </button>
           <button type="button" data-view="reports">
             <i class="fa-solid fa-file-csv" aria-hidden="true"></i>
             Reports
@@ -84,46 +95,55 @@
 
         <section id="view-dashboard" class="view active" aria-label="Dashboard">
           <div class="grid stats">
-            <div class="card">
+            <div class="card dashboard-link" data-dashboard-link="customers" role="button" tabindex="0">
               <div class="label">Total customers</div>
               <div class="value" id="statTotalCustomers">0</div>
             </div>
-            <div class="card">
+            <div class="card dashboard-link" data-dashboard-link="customers-active" role="button" tabindex="0">
               <div class="label">Active</div>
               <div class="value" id="statActive">0</div>
             </div>
-            <div class="card">
+            <div class="card dashboard-link" data-dashboard-link="customers-expired" role="button" tabindex="0">
               <div class="label">Expired</div>
               <div class="value" id="statExpired">0</div>
             </div>
-            <div class="card">
+            <div class="card dashboard-link" data-dashboard-link="customers-terminated" role="button" tabindex="0">
+              <div class="label">Terminated</div>
+              <div class="value" id="statTerminated">0</div>
+              <div class="hint">Expired more than 15 days</div>
+            </div>
+            <div class="card dashboard-link" data-dashboard-link="dues" role="button" tabindex="0">
               <div class="label">Total due (PKR)</div>
               <div class="value" id="statDue">0</div>
             </div>
-            <div class="card">
+            <div class="card dashboard-link" data-dashboard-link="collection-today" role="button" tabindex="0">
               <div class="label">Today’s collection</div>
               <div class="value" id="statToday">0</div>
               <div class="hint">Sum of payments dated today</div>
             </div>
           </div>
 
-          <div class="actions-row no-print">
-            <button class="btn primary" type="button" id="qaAddCustomer">
-              <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
-              Add customer
-            </button>
-            <button class="btn ghost" type="button" id="qaExportCustomers">
-              <i class="fa-solid fa-file-export" aria-hidden="true"></i>
-              Export customers
-            </button>
-            <button class="btn ghost" type="button" id="qaImportCustomers">
-              <i class="fa-solid fa-file-import" aria-hidden="true"></i>
-              Import customers
-            </button>
+          <div class="card push">
+            <div class="label">Expired customers</div>
+            <div class="table-wrap push">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>User ID</th>
+                    <th>Phone</th>
+                    <th>Expiry</th>
+                    <th>Due</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyExpired"></tbody>
+              </table>
+            </div>
           </div>
 
-          <div class="card">
-            <div class="label">Expiring in next 10 days</div>
+          <div class="card push">
+            <div class="label">Expiring soon (next 7 days)</div>
             <div class="table-wrap push">
               <table>
                 <thead>
@@ -137,6 +157,46 @@
                   </tr>
                 </thead>
                 <tbody id="tbodyExpiring"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card push">
+            <div class="label">Defaulter customers</div>
+            <p class="hint tight">Customers with unpaid dues older than 15 days.</p>
+            <div class="table-wrap push">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>User ID</th>
+                    <th>Phone</th>
+                    <th>Due since</th>
+                    <th>Days unpaid</th>
+                    <th>Due</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyDefaulters"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card push">
+            <div class="label">Terminated customers</div>
+            <p class="hint tight">Customers expired for more than 15 days are marked terminated, but not deleted.</p>
+            <div class="table-wrap push">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>User ID</th>
+                    <th>Phone</th>
+                    <th>Expiry</th>
+                    <th>Days overdue</th>
+                    <th>Due</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyTerminated"></tbody>
               </table>
             </div>
           </div>
@@ -178,6 +238,7 @@
                   <option value="">All</option>
                   <option value="active">Active</option>
                   <option value="expired">Expired</option>
+                  <option value="terminated">Terminated</option>
                   <option value="inactive">Inactive</option>
                 </select>
               </div>
@@ -281,11 +342,148 @@
 
         <section id="view-collection" class="view" aria-label="Collection">
           <div class="card">
+            <div class="label">Agent collection summary</div>
+            <p class="hint tight">
+              Track how much each collection agent collected, how much was handed over, and remaining balance with the agent.
+            </p>
+            <div class="table-wrap push">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Agent</th>
+                    <th>Collected</th>
+                    <th>Received from agent</th>
+                    <th>Balance with agent</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyAgentCollectionSummary"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card push admin-only">
+            <div class="label">Collect amount from agent</div>
+            <div class="form-grid push-md">
+              <div class="field">
+                <label for="agentReceiptAgent">Agent</label>
+                <select id="agentReceiptAgent"></select>
+              </div>
+              <div class="field">
+                <label for="agentReceiptAmount">Amount received</label>
+                <input id="agentReceiptAmount" type="number" step="0.01" min="0.01" />
+              </div>
+              <div class="field">
+                <label for="agentReceiptDate">Received date</label>
+                <input id="agentReceiptDate" type="date" />
+              </div>
+              <div class="field full">
+                <label for="agentReceiptNotes">Notes</label>
+                <input id="agentReceiptNotes" type="text" placeholder="Cash received / bank deposit / remarks" />
+              </div>
+            </div>
+            <div class="actions-row end no-print">
+              <button class="btn success" type="button" id="btnSaveAgentReceipt">
+                <i class="fa-solid fa-hand-holding-dollar" aria-hidden="true"></i>
+                Record amount received
+              </button>
+            </div>
+          </div>
+
+          <div class="card push">
+            <div class="label">Agent handover records</div>
+            <div class="table-wrap push">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Agent</th>
+                    <th>Amount</th>
+                    <th>Received by</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyAgentReceipts"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
             <div class="label">Collection</div>
             <p class="hint tight">
               All payments grouped by collection date. Only dates that have at least one payment are shown, newest first. Within a day, rows follow invoice number order.
             </p>
             <div id="collectionWeekRoot" class="collection-week"></div>
+          </div>
+        </section>
+
+        <section id="view-agents" class="view" aria-label="Agents">
+          <div class="card">
+            <div class="label">Agent control</div>
+            <div class="form-grid push-md">
+              <div class="field full">
+                <label for="agentManageSelect">Select agent</label>
+                <select id="agentManageSelect"></select>
+              </div>
+            </div>
+          </div>
+
+          <div class="card push">
+            <div class="label">Allowed areas</div>
+            <p class="hint tight">Selected sub-areas are visible to this agent. If no area is selected, the agent cannot see customers.</p>
+            <div id="agentAreaAccessList" class="agent-area-list push-md"></div>
+            <div class="actions-row end no-print">
+              <button class="btn primary" type="button" id="btnSaveAgentAreas">
+                <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+                Save area access
+              </button>
+            </div>
+          </div>
+
+          <div class="card push">
+            <div class="label">Selected agent collection summary</div>
+            <div id="agentManageSummary" class="push-md"></div>
+          </div>
+
+          <div class="card push">
+            <div class="label">Collect amount from selected agent</div>
+            <div class="form-grid push-md">
+              <div class="field">
+                <label for="agentManageReceiptAmount">Amount received</label>
+                <input id="agentManageReceiptAmount" type="number" step="0.01" min="0.01" />
+              </div>
+              <div class="field">
+                <label for="agentManageReceiptDate">Received date</label>
+                <input id="agentManageReceiptDate" type="date" />
+              </div>
+              <div class="field full">
+                <label for="agentManageReceiptNotes">Notes</label>
+                <input id="agentManageReceiptNotes" type="text" />
+              </div>
+            </div>
+            <div class="actions-row end no-print">
+              <button class="btn success" type="button" id="btnAgentManageReceipt">
+                <i class="fa-solid fa-receipt" aria-hidden="true"></i>
+                Collect and print receipt
+              </button>
+            </div>
+          </div>
+
+          <div class="card push">
+            <div class="label">Selected agent collections</div>
+            <div class="table-wrap push">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Invoice</th>
+                    <th>Customer</th>
+                    <th>Amount</th>
+                    <th>Method</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyAgentManagePayments"></tbody>
+              </table>
+            </div>
           </div>
         </section>
 
@@ -620,9 +818,9 @@
           </div>
 
           <div class="card push admin-only">
-            <div class="label">Create collection agent</div>
+            <div class="label">Create user account</div>
             <p class="hint tight">
-              Collection agents can view customers, dues, collection, and reports, and can receive payments.
+              Create another admin with full access, or create collection agents with limited collection/viewing rights.
             </p>
             <div class="form-grid push-md">
               <div class="field">
@@ -638,6 +836,14 @@
                 <input id="agentEmail" type="email" autocomplete="off" />
               </div>
               <div class="field">
+                <label for="agentRole">Account role</label>
+                <select id="agentRole">
+                  <option value="collector">Collection agent</option>
+                  <option value="admin">Admin - full access</option>
+                  <option value="manager">Manager - full access</option>
+                </select>
+              </div>
+              <div class="field">
                 <label for="agentPassword">Password</label>
                 <input id="agentPassword" type="password" autocomplete="new-password" />
               </div>
@@ -649,7 +855,7 @@
             <div class="actions-row end no-print">
               <button class="btn success" type="button" id="btnCreateAgent">
                 <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
-                Create collection agent
+                Create account
               </button>
             </div>
           </div>
@@ -665,6 +871,7 @@
                     <th>Email</th>
                     <th>Role</th>
                     <th>Active</th>
+                    <th class="no-print">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="tbodyUsers"></tbody>
@@ -673,6 +880,59 @@
           </div>
         </section>
       </main>
+    </div>
+
+    <div id="modalUserAccount" class="modal-backdrop no-print" role="dialog" aria-modal="true" hidden>
+      <div class="modal">
+        <div class="modal header">
+          <strong>Edit user account</strong>
+          <button class="icon-btn" type="button" data-close="modalUserAccount" aria-label="Close">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="modal body">
+          <input id="userEditId" type="hidden" />
+          <div class="form-grid">
+            <div class="field">
+              <label for="userEditUsername">Username</label>
+              <input id="userEditUsername" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="userEditFullName">Full name</label>
+              <input id="userEditFullName" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="userEditEmail">Email</label>
+              <input id="userEditEmail" type="email" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="userEditRole">Role</label>
+              <select id="userEditRole">
+                <option value="collector">Collection agent</option>
+                <option value="admin">Admin - full access</option>
+                <option value="manager">Manager - full access</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="userEditActive">Status</label>
+              <select id="userEditActive">
+                <option value="true">Active</option>
+                <option value="false">Inactive</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="userEditPassword">New password (optional)</label>
+              <input id="userEditPassword" type="password" autocomplete="new-password" />
+            </div>
+          </div>
+          <div class="actions-row end">
+            <button class="btn primary" type="button" id="btnSaveUserAccount">
+              <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+              Save account
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div id="modalDueDetail" class="modal-backdrop no-print" role="dialog" aria-modal="true" hidden>
@@ -826,6 +1086,7 @@
               <select id="custStatus">
                 <option value="active">Active</option>
                 <option value="expired">Expired</option>
+                <option value="terminated">Terminated</option>
                 <option value="inactive">Inactive</option>
               </select>
             </div>
@@ -1136,6 +1397,10 @@
         <div class="modal header">
           <strong id="invoiceModalTitle">Invoice</strong>
           <div class="invoice-header-actions">
+            <button class="btn ghost" type="button" id="btnInvoicePrint">
+              <i class="fa-solid fa-print" aria-hidden="true"></i>
+              Print
+            </button>
             <button class="btn ghost" type="button" id="btnInvoicePdf">
               <i class="fa-solid fa-file-pdf" aria-hidden="true"></i>
               Download PDF
@@ -1156,6 +1421,8 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="js/config.js"></script>
     <script src="messages/ui.js"></script>

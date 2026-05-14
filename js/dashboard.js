@@ -9,6 +9,8 @@
     paymentMethods: [],
     users: [],
     payments: [],
+    agentCollectionReceipts: [],
+    agentAreaAccess: [],
     dueCharges: [],
     paymentAllocations: [],
     currentUser: null,
@@ -252,6 +254,50 @@
 
   function roundMoney(n) {
     return Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100;
+  }
+
+  function userById(id) {
+    return state.users.find(function (u) {
+      return u.id === id;
+    }) || null;
+  }
+
+  function userDisplayName(id) {
+    const u = userById(id);
+    if (!u) return id ? "Unknown user" : "Unassigned / legacy";
+    return (u.full_name || u.username || "User") + " (" + (u.role || "user") + ")";
+  }
+
+  function agentAllowedAreaIds(agentId) {
+    return state.agentAreaAccess
+      .filter(function (x) {
+        return x.agent_id === agentId;
+      })
+      .map(function (x) {
+        return x.area_id;
+      });
+  }
+
+  function canCollectorAccessCustomer(c) {
+    if (!isCollector()) return true;
+    if (!c || !c.area_id) return false;
+    return agentAllowedAreaIds(state.currentUser && state.currentUser.id).indexOf(c.area_id) !== -1;
+  }
+
+  function visibleCustomers() {
+    return state.customers.filter(canCollectorAccessCustomer);
+  }
+
+  function paymentCustomer(p) {
+    return state.customers.find(function (c) {
+      return c.id === p.customer_id;
+    }) || null;
+  }
+
+  function collectionAgents() {
+    return state.users.filter(function (u) {
+      return u.is_active !== false && (u.role === "collector" || u.role === "admin" || u.role === "manager");
+    });
   }
 
   function formatDisplayDate(iso) {
@@ -509,7 +555,7 @@
       ) {
         row.individual_discount_type = "none";
       }
-      if (["active", "expired", "inactive"].indexOf(row.status) === -1) {
+      if (["active", "expired", "terminated", "inactive"].indexOf(row.status) === -1) {
         row.status = "active";
       }
       if (!row.package_expiry_date) {
@@ -1085,9 +1131,13 @@
       );
     }
 
-    function sectionHeader(title) {
+    function sectionHeader(title, cls) {
       lines.push(
-        "<tr><td colspan=\"4\"><strong>" + escapeHtml(title) + "</strong></td></tr>"
+        "<tr" +
+          (cls ? " class=\"" + escapeHtml(cls) + "\"" : "") +
+          "><td colspan=\"4\"><strong>" +
+          escapeHtml(title) +
+          "</strong></td></tr>"
       );
     }
 
@@ -1126,12 +1176,11 @@
     const groups = groupAllocationsByPayment(paymentApplicationsForCustomer(customerId));
     let totalReceipts = 0;
     if (groups.length) {
-      sectionHeader("Payment receipts (payments received, by date)");
+      sectionHeader("Payment receipts (payments received, by date)", "receipt-section-header");
       groups.forEach(function (g) {
         const pay = g.payment;
         const pd = paymentDateISO(pay) || "";
         const displayDate = formatDisplayDate(pd);
-        const inv = (pay.invoice_number && String(pay.invoice_number).trim()) || "";
         const pm =
           pay.payment_methods && pay.payment_methods.method_name
             ? String(pay.payment_methods.method_name)
@@ -1139,7 +1188,6 @@
         const bits = [
           "Payment <strong>" + escapeHtml(displayDate) + "</strong>"
         ];
-        if (inv) bits.push("Inv. " + escapeHtml(inv));
         if (pm) bits.push(escapeHtml(pm));
         if (pay.is_partial) bits.push("partial");
         const sum = g.lines.reduce(function (acc, x) {
@@ -1156,7 +1204,7 @@
           })
           .join("; ");
         lines.push(
-          "<tr><td>" +
+          "<tr class=\"receipt-payment-row\"><td>" +
             bits.join(" · ") +
             "<br/><span class=\"muted\">Applied: " +
             breakdown +
@@ -1241,7 +1289,6 @@
       groups.forEach(function (g) {
         const pay = g.payment;
         const pd = formatDisplayDate(paymentDateISO(pay) || "");
-        const inv = (pay.invoice_number && String(pay.invoice_number).trim()) || "";
         const pm =
           pay.payment_methods && pay.payment_methods.method_name
             ? String(pay.payment_methods.method_name)
@@ -1260,7 +1307,6 @@
         lines.push(
           "  - " +
             pd +
-            (inv ? " (Inv. " + inv + ")" : "") +
             (pm ? " · " + pm : "") +
             (pay.is_partial ? " · partial" : "") +
             " — paid " +
@@ -1567,6 +1613,8 @@
       pmRes,
       userRes,
       payRes,
+      acrRes,
+      aaaRes,
       dcRes,
       pdaRes
     ] = await Promise.all([
@@ -1584,6 +1632,8 @@
           "*, customers ( full_name, pppoe_id ), payment_methods ( method_name )"
         )
         .order("payment_date", { ascending: false }),
+      sb.from("agent_collection_receipts").select("*").order("received_date", { ascending: false }),
+      sb.from("agent_area_access").select("*"),
       sb.from("customer_due_charges").select("*").order("created_at", { ascending: true }),
       sb.from("payment_due_allocations").select("*")
     ]);
@@ -1603,6 +1653,18 @@
     state.paymentMethods = pmRes.data || [];
     state.users = userRes.data || [];
     state.payments = payRes.data || [];
+    if (acrRes.error) {
+      state.agentCollectionReceipts = [];
+      console.warn(acrRes.error);
+    } else {
+      state.agentCollectionReceipts = acrRes.data || [];
+    }
+    if (aaaRes.error) {
+      state.agentAreaAccess = [];
+      console.warn(aaaRes.error);
+    } else {
+      state.agentAreaAccess = aaaRes.data || [];
+    }
     if (dcRes.error) {
       state.dueCharges = [];
       console.warn(dcRes.error);
@@ -1616,25 +1678,51 @@
       state.paymentAllocations = pdaRes.data || [];
     }
 
-    syncAllCustomerStatus();
+    await syncAllCustomerStatus(sb);
     await backfillLegacyDueCharges(sb);
   }
 
-  function syncAllCustomerStatus() {
+  function computedCustomerStatus(c) {
+    if (c.status === "inactive") return "inactive";
+    if (!c.package_expiry_date) return c.status || "active";
+    const left = daysBetweenISO(todayISODate(), c.package_expiry_date);
+    if (left == null) return c.status || "active";
+    if (left < -15) return "terminated";
+    if (left < 0) return "expired";
+    return "active";
+  }
+
+  async function syncAllCustomerStatus(sb) {
+    const updates = [];
     const t = todayISODate();
-    state.customers.forEach(function (c) {
-      if (c.status === "inactive") return;
-      if (c.package_expiry_date && c.package_expiry_date < t) {
-        c.status = "expired";
-      } else if (c.package_expiry_date && c.package_expiry_date >= t) {
-        c.status = "active";
+    visibleCustomers().forEach(function (c) {
+      const next = computedCustomerStatus(c);
+      if (next !== c.status) {
+        c.status = next;
+        updates.push({ id: c.id, status: next });
       }
     });
+    if (!isAdminUser() || !sb || !updates.length) return;
+    for (let i = 0; i < updates.length; i += 1) {
+      const up = await sb
+        .from("customers")
+        .update({ status: updates[i].status })
+        .eq("id", updates[i].id);
+      if (up.error) {
+        console.warn(up.error);
+      }
+    }
   }
 
   function badgeForStatus(st) {
     const cls =
-      st === "active" ? "active" : st === "expired" ? "expired" : "inactive";
+      st === "active"
+        ? "active"
+        : st === "expired"
+        ? "expired"
+        : st === "terminated"
+        ? "terminated"
+        : "inactive";
     return (
       '<span class="badge ' +
       cls +
@@ -1644,20 +1732,49 @@
     );
   }
 
+  function defaulterDueInfo(c, todayIso) {
+    if (!(Number(c.due_amount || 0) > 0)) return null;
+    const openCharges = dueChargesForCustomer(c.id)
+      .filter(function (x) {
+        return Number(x.amount_remaining || 0) > 0.000001;
+      })
+      .sort(function (a, b) {
+        return String(a.created_at || "").localeCompare(String(b.created_at || ""));
+      });
+    let dueSince = "";
+    if (openCharges.length && openCharges[0].created_at) {
+      dueSince = String(openCharges[0].created_at).slice(0, 10);
+    } else if (c.package_expiry_date) {
+      dueSince = c.package_expiry_date;
+    } else if (c.created_at) {
+      dueSince = String(c.created_at).slice(0, 10);
+    }
+    const unpaidDays = dueSince ? daysBetweenISO(dueSince, todayIso) : null;
+    if (unpaidDays == null || unpaidDays <= 15) return null;
+    return {
+      dueSince: dueSince,
+      unpaidDays: unpaidDays
+    };
+  }
+
   function renderDashboard() {
     const t = todayISODate();
-    let total = state.customers.length;
+    const customers = visibleCustomers();
+    let total = customers.length;
     let active = 0;
     let expired = 0;
+    let terminated = 0;
     let dueSum = 0;
-    state.customers.forEach(function (c) {
+    customers.forEach(function (c) {
       dueSum += Number(c.due_amount || 0);
       if (c.status === "active") active++;
       else if (c.status === "expired") expired++;
+      else if (c.status === "terminated") terminated++;
     });
 
+    const collectionPayments = visibleCollectionPayments();
     let todayCol = 0;
-    state.payments.forEach(function (p) {
+    collectionPayments.forEach(function (p) {
       if (paymentDateISO(p) === t) {
         todayCol += Number(p.paid_amount || 0);
       }
@@ -1666,30 +1783,133 @@
     const stTot = $("statTotalCustomers");
     const stAct = $("statActive");
     const stExp = $("statExpired");
+    const stTerm = $("statTerminated");
     const stDue = $("statDue");
     const stToday = $("statToday");
     if (stTot) stTot.textContent = String(total);
     if (stAct) stAct.textContent = String(active);
     if (stExp) stExp.textContent = String(expired);
+    if (stTerm) stTerm.textContent = String(terminated);
     if (stDue) stDue.textContent = formatPKR(dueSum).replace("PKR ", "");
     if (stToday) stToday.textContent = formatPKR(todayCol).replace("PKR ", "");
 
+    const expiredRows = [];
     const expRows = [];
-    state.customers.forEach(function (c) {
+    const defRows = [];
+    const termRows = [];
+    customers.forEach(function (c) {
+      if (c.status === "expired") {
+        expiredRows.push({ c: c });
+      }
+      const def = defaulterDueInfo(c, t);
+      if (def) {
+        defRows.push({ c: c, dueSince: def.dueSince, unpaidDays: def.unpaidDays });
+      }
       if (!c.package_expiry_date) return;
       const left = daysBetweenISO(t, c.package_expiry_date);
       if (left == null) return;
-      if (left >= 0 && left <= 10) {
+      if (left >= 0 && left <= 7) {
         expRows.push({ c: c, left: left });
+      }
+      if (left < -15) {
+        termRows.push({ c: c, overdue: Math.abs(left) });
       }
     });
     expRows.sort(function (a, b) {
       return a.left - b.left;
     });
+    expiredRows.sort(function (a, b) {
+      return String(a.c.package_expiry_date || "").localeCompare(String(b.c.package_expiry_date || ""));
+    });
+    defRows.sort(function (a, b) {
+      return b.unpaidDays - a.unpaidDays;
+    });
+    termRows.sort(function (a, b) {
+      return b.overdue - a.overdue;
+    });
+
+    const tbExpired = $("tbodyExpired");
+    if (tbExpired) {
+      tbExpired.innerHTML = expiredRows.length
+        ? expiredRows
+            .map(function (r) {
+              const c = r.c;
+              return (
+                "<tr><td>" +
+                escapeHtml(c.full_name) +
+                "</td><td>" +
+                escapeHtml(c.pppoe_id) +
+                "</td><td>" +
+                escapeHtml(c.phone || "") +
+                "</td><td>" +
+                escapeHtml(formatDisplayDate(c.package_expiry_date)) +
+                "</td><td>" +
+                escapeHtml(formatPKR(c.due_amount)) +
+                "</td><td>" +
+                badgeForStatus(c.status) +
+                "</td></tr>"
+              );
+            })
+            .join("")
+        : "<tr><td colspan='6' class='muted'>No expired customers.</td></tr>";
+    }
+
+    const tbDef = $("tbodyDefaulters");
+    if (tbDef) {
+      tbDef.innerHTML = defRows.length
+        ? defRows
+            .map(function (r) {
+              const c = r.c;
+              return (
+                "<tr><td>" +
+                escapeHtml(c.full_name) +
+                "</td><td>" +
+                escapeHtml(c.pppoe_id) +
+                "</td><td>" +
+                escapeHtml(c.phone || "") +
+                "</td><td>" +
+                escapeHtml(formatDisplayDate(r.dueSince)) +
+                "</td><td>" +
+                r.unpaidDays +
+                "</td><td>" +
+                escapeHtml(formatPKR(c.due_amount)) +
+                "</td></tr>"
+              );
+            })
+            .join("")
+        : "<tr><td colspan='6' class='muted'>No defaulter customers.</td></tr>";
+    }
+
+    const tbTerm = $("tbodyTerminated");
+    if (tbTerm) {
+      tbTerm.innerHTML = termRows.length
+        ? termRows
+            .map(function (r) {
+              const c = r.c;
+              return (
+                "<tr><td>" +
+                escapeHtml(c.full_name) +
+                "</td><td>" +
+                escapeHtml(c.pppoe_id) +
+                "</td><td>" +
+                escapeHtml(c.phone || "") +
+                "</td><td>" +
+                escapeHtml(formatDisplayDate(c.package_expiry_date)) +
+                "</td><td>" +
+                r.overdue +
+                "</td><td>" +
+                escapeHtml(formatPKR(c.due_amount)) +
+                "</td></tr>"
+              );
+            })
+            .join("")
+        : "<tr><td colspan='6' class='muted'>No terminated customers.</td></tr>";
+    }
 
     const tbEx = $("tbodyExpiring");
     if (tbEx) {
-      tbEx.innerHTML = expRows
+      tbEx.innerHTML = expRows.length
+      ? expRows
       .map(function (r) {
         const c = r.c;
         return (
@@ -1708,13 +1928,14 @@
           "</td></tr>"
         );
       })
-      .join("");
+      .join("")
+      : "<tr><td colspan='6' class='muted'>No customers expiring in the next 7 days.</td></tr>";
     }
 
     const since = new Date();
     since.setDate(since.getDate() - 7);
     const sinceIso = toISODate(since);
-    const recent = state.payments.filter(function (p) {
+    const recent = collectionPayments.filter(function (p) {
       return paymentDateISO(p) >= sinceIso;
     });
 
@@ -1749,7 +1970,7 @@
     const area = ($("custFilterArea") && $("custFilterArea").value) || "";
     const pkg = ($("custFilterPackage") && $("custFilterPackage").value) || "";
     const st = ($("custFilterStatus") && $("custFilterStatus").value) || "";
-    return state.customers.filter(function (c) {
+    return visibleCustomers().filter(function (c) {
       if (area && c.area_id !== area) return false;
       if (pkg && c.package_id !== pkg) return false;
       if (st && c.status !== st) return false;
@@ -1794,7 +2015,12 @@
     const sel = $("custFilterArea");
     if (!sel) return;
     const opts = ['<option value="">All areas</option>'];
-    state.areas.forEach(function (a) {
+    const allowed = isCollector()
+      ? agentAllowedAreaIds(state.currentUser && state.currentUser.id)
+      : null;
+    state.areas.filter(function (a) {
+      return !allowed || allowed.indexOf(a.id) !== -1;
+    }).forEach(function (a) {
       opts.push(
         '<option value="' +
           escapeHtml(a.id) +
@@ -1836,7 +2062,9 @@
     const opts = ['<option value="">All areas</option>'];
     const subs = state.areas
       .filter(function (a) {
-        return a.parent_area_id;
+        if (!a.parent_area_id) return false;
+        if (!isCollector()) return true;
+        return agentAllowedAreaIds(state.currentUser && state.currentUser.id).indexOf(a.id) !== -1;
       })
       .sort(function (a, b) {
         return areaLabelTree(a).localeCompare(areaLabelTree(b));
@@ -1858,7 +2086,7 @@
 
   function duesCustomersWithBalance() {
     const area = ($("duesFilterArea") && $("duesFilterArea").value) || "";
-    return state.customers.filter(function (c) {
+    return visibleCustomers().filter(function (c) {
       if (!(Number(c.due_amount || 0) > 0)) return false;
       if (area && c.area_id !== area) return false;
       return true;
@@ -1925,7 +2153,7 @@
     const sel = $("dueAnyCustomer");
     if (!sel) return;
     const opts = ['<option value="">— Select customer —</option>'];
-    state.customers.forEach(function (c) {
+    visibleCustomers().forEach(function (c) {
       opts.push(
         '<option value="' +
           escapeHtml(c.id) +
@@ -1964,7 +2192,10 @@
           '">Receive payment</button> ' +
           '<button class="btn ghost" type="button" data-due-inv="' +
           escapeHtml(c.id) +
-          '">Due invoice</button> ' +
+          '">Current invoice</button> ' +
+          '<button class="btn ghost" type="button" data-due-statement="' +
+          escapeHtml(c.id) +
+          '">Statement</button> ' +
           '<button class="btn ghost" type="button" data-due-wa="' +
           escapeHtml(c.id) +
           '"><i class="fa-brands fa-whatsapp"></i> Reminder</button>' +
@@ -2084,6 +2315,7 @@
     if (!tb) return;
     tb.innerHTML = state.users
       .map(function (u) {
+        const isSelf = state.currentUser && state.currentUser.id === u.id;
         return (
           "<tr><td>" +
           escapeHtml(u.username || "") +
@@ -2095,6 +2327,15 @@
           escapeHtml(u.role || "") +
           "</td><td>" +
           (u.is_active ? "Yes" : "No") +
+          '</td><td class="no-print">' +
+          '<button class="btn ghost" type="button" data-user-edit="' +
+          escapeHtml(u.id) +
+          '">Edit</button> ' +
+          (!isSelf
+            ? '<button class="btn danger" type="button" data-user-del="' +
+              escapeHtml(u.id) +
+              '">Delete</button>'
+            : '<span class="muted">Current user</span>') +
           "</td></tr>"
         );
       })
@@ -2108,13 +2349,13 @@
 
   function applyRolePermissions() {
     const collector = isCollector();
-    document.querySelectorAll('[data-view="packages"], [data-view="payments"], [data-view="areas"]').forEach(function (el) {
+    document.querySelectorAll('[data-view="packages"], [data-view="payments"], [data-view="areas"], [data-view="agents"]').forEach(function (el) {
       el.hidden = collector;
     });
     document.querySelectorAll(".admin-only").forEach(function (el) {
       el.hidden = !isAdminUser();
     });
-    ["qaAddCustomer", "qaExportCustomers", "qaImportCustomers", "btnAddCustomer", "btnExportCustomers", "btnImportCustomers"].forEach(function (id) {
+    ["btnAddCustomer", "btnExportCustomers", "btnImportCustomers"].forEach(function (id) {
       const el = $(id);
       if (el) el.hidden = collector;
     });
@@ -2162,23 +2403,31 @@
     toast("Password changed.", "ok");
   }
 
+  function roleDisplayName(role) {
+    if (role === "admin") return "Admin";
+    if (role === "manager") return "Manager";
+    if (role === "collector") return "Collection agent";
+    return role || "User";
+  }
+
   async function createCollectionAgentAccount() {
     if (!requireAdminAction()) return;
     const username = ($("agentUsername") && $("agentUsername").value.trim()) || "";
     const fullName = ($("agentFullName") && $("agentFullName").value.trim()) || "";
     const email = ($("agentEmail") && $("agentEmail").value.trim()) || "";
+    const role = ($("agentRole") && $("agentRole").value) || "collector";
     const password = ($("agentPassword") && $("agentPassword").value) || "";
     const confirmPassword = ($("agentConfirmPassword") && $("agentConfirmPassword").value) || "";
     if (!username || !fullName || !email || !password || !confirmPassword) {
-      toast("Fill all collection agent fields.", "err");
+      toast("Fill all account fields.", "err");
       return;
     }
     if (password.length < 6) {
-      toast("Agent password must be at least 6 characters.", "err");
+      toast("Account password must be at least 6 characters.", "err");
       return;
     }
     if (password !== confirmPassword) {
-      toast("Agent password and confirmation do not match.", "err");
+      toast("Account password and confirmation do not match.", "err");
       return;
     }
     const passwordHash = await window.ISPAuth.sha256Hex(password);
@@ -2187,7 +2436,7 @@
       email: email,
       password_hash: passwordHash,
       full_name: fullName,
-      role: "collector",
+      role: role,
       is_active: true
     });
     if (res.error) {
@@ -2198,7 +2447,113 @@
       const el = $(id);
       if (el) el.value = "";
     });
-    toast("Collection agent created.", "ok");
+    if ($("agentRole")) $("agentRole").value = "collector";
+    toast(roleDisplayName(role) + " account created.", "ok");
+    await refresh();
+  }
+
+  function openUserAccountModal(userId) {
+    if (!requireAdminAction()) return;
+    const u = userById(userId);
+    if (!u) {
+      toast("User account not found.", "err");
+      return;
+    }
+    if ($("userEditId")) $("userEditId").value = u.id;
+    if ($("userEditUsername")) $("userEditUsername").value = u.username || "";
+    if ($("userEditFullName")) $("userEditFullName").value = u.full_name || "";
+    if ($("userEditEmail")) $("userEditEmail").value = u.email || "";
+    if ($("userEditRole")) $("userEditRole").value = u.role || "collector";
+    if ($("userEditActive")) $("userEditActive").value = u.is_active === false ? "false" : "true";
+    if ($("userEditPassword")) $("userEditPassword").value = "";
+    openBackdrop($("modalUserAccount"));
+  }
+
+  async function saveUserAccount() {
+    if (!requireAdminAction()) return;
+    const id = $("userEditId") ? $("userEditId").value : "";
+    const current = userById(id);
+    if (!current) {
+      toast("User account not found.", "err");
+      return;
+    }
+    const username = ($("userEditUsername") && $("userEditUsername").value.trim()) || "";
+    const fullName = ($("userEditFullName") && $("userEditFullName").value.trim()) || "";
+    const email = ($("userEditEmail") && $("userEditEmail").value.trim()) || "";
+    const role = ($("userEditRole") && $("userEditRole").value) || "collector";
+    const isActive = (($("userEditActive") && $("userEditActive").value) || "true") === "true";
+    const password = ($("userEditPassword") && $("userEditPassword").value) || "";
+    if (!username || !fullName || !email) {
+      toast("Username, name, and email are required.", "err");
+      return;
+    }
+    const isSelf = state.currentUser && state.currentUser.id === id;
+    if (isSelf && (!isActive || (role !== "admin" && role !== "manager"))) {
+      toast("You cannot remove full access from the account you are using.", "err");
+      return;
+    }
+    const patch = {
+      username: username,
+      full_name: fullName,
+      email: email,
+      role: role,
+      is_active: isActive
+    };
+    if (password) {
+      if (password.length < 6) {
+        toast("New password must be at least 6 characters.", "err");
+        return;
+      }
+      patch.password_hash = await window.ISPAuth.sha256Hex(password);
+    }
+    const res = await getClient().from("users").update(patch).eq("id", id);
+    if (res.error) {
+      toast(res.error.message, "err");
+      return;
+    }
+    if (isSelf) {
+      state.currentUser = Object.assign({}, state.currentUser, {
+        username: username,
+        full_name: fullName,
+        email: email,
+        role: role,
+        is_active: isActive
+      });
+      window.ISPAuth.setSessionUser(state.currentUser);
+    }
+    closeBackdrop($("modalUserAccount"));
+    toast("User account updated.", "ok");
+    await refresh();
+  }
+
+  async function deleteUserAccount(userId) {
+    if (!requireAdminAction()) return;
+    const u = userById(userId);
+    if (!u) {
+      toast("User account not found.", "err");
+      return;
+    }
+    if (state.currentUser && state.currentUser.id === userId) {
+      toast("You cannot delete the account you are using.", "err");
+      return;
+    }
+    const ok = window.confirm(
+      "Delete/deactivate user account " +
+        (u.full_name || u.username || "this user") +
+        "? This will stop login access and remove assigned areas, but old collection receipts will keep this user's name."
+    );
+    if (!ok) return;
+    const sb = getClient();
+    const res = await sb.from("users").update({ is_active: false }).eq("id", userId);
+    if (res.error) {
+      toast(res.error.message, "err");
+      return;
+    }
+    const areas = await sb.from("agent_area_access").delete().eq("agent_id", userId);
+    if (areas.error) {
+      console.warn(areas.error);
+    }
+    toast("User account deactivated.", "ok");
     await refresh();
   }
 
@@ -2220,6 +2575,7 @@
       customers: "Customers",
       dues: "Dues",
       collection: "Collection",
+      agents: "Agents",
       packages: "Packages",
       payments: "Payment Methods",
       areas: "Areas",
@@ -2229,7 +2585,43 @@
     const pt = $("pageTitle");
     if (pt) pt.textContent = titles[name] || "Dashboard";
     if (name === "collection") renderCollection();
+    if (name === "agents") renderAgentsPanel();
     if (name === "reports") renderReportsInline();
+  }
+
+  function openDashboardLink(target) {
+    if (
+      target === "customers" ||
+      target === "customers-active" ||
+      target === "customers-expired" ||
+      target === "customers-terminated"
+    ) {
+      const st = $("custFilterStatus");
+      if (st) {
+        st.value =
+          target === "customers-active"
+            ? "active"
+            : target === "customers-expired"
+            ? "expired"
+            : target === "customers-terminated"
+            ? "terminated"
+            : "";
+      }
+      renderCustomersTable();
+      setView("customers");
+      return;
+    }
+    if (target === "dues") {
+      setView("dues");
+      return;
+    }
+    if (target === "collection-today") {
+      setView("collection");
+      setTimeout(function () {
+        const today = document.querySelector('[data-collection-day="' + todayISODate() + '"]');
+        if (today && today.scrollIntoView) today.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 50);
+    }
   }
 
   function exportCustomersCsv() {
@@ -2577,7 +2969,7 @@
     ) {
       return;
     }
-    const status = c.status === "inactive" ? "inactive" : newExpiry >= todayISODate() ? "active" : "expired";
+    const status = computedCustomerStatus(Object.assign({}, c, { package_expiry_date: newExpiry }));
     const res = await getClient()
       .from("customers")
       .update({ package_expiry_date: newExpiry, status: status })
@@ -2639,6 +3031,22 @@
         (dup.transaction_id ? "\nTransaction ID: " + dup.transaction_id : "") +
         ".\n\nPress OK to allow this duplicate payment, or Cancel to deny it."
     );
+  }
+
+  async function insertPaymentRow(sb, payRow) {
+    const withCollector = Object.assign({}, payRow, {
+      collected_by_user_id: state.currentUser && state.currentUser.id ? state.currentUser.id : null
+    });
+    let ins = await sb.from("payments").insert(withCollector).select("id");
+    if (
+      ins.error &&
+      String(ins.error.message || "").toLowerCase().indexOf("collected_by_user_id") !== -1
+    ) {
+      console.warn(ins.error);
+      toast("Agent tracking column is missing. Run migration_agent_collections.sql.", "err");
+      ins = await sb.from("payments").insert(payRow).select("id");
+    }
+    return ins;
   }
 
   function setPaymentSubmitting(isSubmitting) {
@@ -2935,7 +3343,7 @@
       payment_status: isPartial ? "partial" : "completed"
     };
 
-    const ins = await sb.from("payments").insert(payRow).select("id");
+    const ins = await insertPaymentRow(sb, payRow);
     if (ins.error) {
       toast(ins.error.message, "err");
       return;
@@ -2998,7 +3406,8 @@
       newExpiry: priorExpiry || "",
       rechargeMonth: payRow.recharge_month,
       paymentDate: payRow.payment_date,
-      totalBill: due0
+      totalBill: due0,
+      collectedByUserId: state.currentUser && state.currentUser.id
     };
 
     await refresh();
@@ -3085,6 +3494,23 @@
     );
   }
 
+  function invoiceBrandHeaderHtml() {
+    return (
+      '<div class="invoice-brand">' +
+      '<div class="invoice-logo" aria-hidden="true">' +
+      '<span class="invoice-router-body"></span>' +
+      '<span class="invoice-router-antenna invoice-antenna-left"></span>' +
+      '<span class="invoice-router-antenna invoice-antenna-right"></span>' +
+      '<span class="invoice-wifi-arc invoice-arc-1"></span>' +
+      '<span class="invoice-wifi-arc invoice-arc-2"></span>' +
+      '<span class="invoice-router-light"></span>' +
+      "</div>" +
+      '<div><div class="invoice-company">Lasbela Link</div>' +
+      '<div class="invoice-company-sub">Fiber Optics & Wi-Fi Internet Services</div></div>' +
+      "</div>"
+    );
+  }
+
   function buildInvoiceHtml(ctx) {
     const c = ctx.customer;
     const pricing = computeMonthlyPricing(c);
@@ -3100,6 +3526,13 @@
     lines.push("<p><strong>User ID:</strong> " + escapeHtml(c.pppoe_id) + "</p>");
     lines.push("<p><strong>Phone:</strong> " + escapeHtml(c.phone || "") + "</p>");
     lines.push("<p><strong>Address:</strong> " + escapeHtml(c.address || "") + "</p>");
+    if (ctx.kind === "due") {
+      lines.push(
+        "<p><strong>Installation date:</strong> " +
+          escapeHtml(formatDisplayDate(c.installation_date)) +
+          "</p>"
+      );
+    }
     const ar = areaMainSubForInvoice(c);
     lines.push("<p><strong>Main area:</strong> " + escapeHtml(ar.main) + "</p>");
     lines.push("<p><strong>Sub-area:</strong> " + escapeHtml(ar.sub) + "</p>");
@@ -3117,7 +3550,7 @@
       dateLabel =
         ctx.paymentMode === "accrual" ? "Recharge date" : "Payment date";
       dateVal = formatDisplayDate(ctx.paymentDate);
-    } else if (ctx.kind === "due") {
+    } else if (ctx.kind === "due" || ctx.kind === "due_current") {
       dateLabel = "Statement date";
       dateVal = formatDisplayDate(todayISODate());
     } else if (ctx.kind === "summary") {
@@ -3130,6 +3563,13 @@
     lines.push(
       "<p><strong>" + escapeHtml(dateLabel) + ":</strong> " + escapeHtml(dateVal) + "</p>"
     );
+    if (ctx.kind === "receipt" && ctx.paymentMode === "receive") {
+      lines.push(
+        "<p><strong>Payment collected by:</strong> " +
+          escapeHtml(userDisplayName(ctx.collectedByUserId || (state.currentUser && state.currentUser.id))) +
+          "</p>"
+      );
+    }
     let period = "—";
     if (ctx.kind === "summary") {
       period = monthTokenFromDate(new Date());
@@ -3137,7 +3577,7 @@
       period = invoiceRechargeMonthPeriod(ctx);
     }
     lines.push("<p><strong>Period / recharge month:</strong> " + escapeHtml(period) + "</p>");
-    if (ctx.kind === "due") {
+    if (ctx.kind === "due" || ctx.kind === "due_current") {
       lines.push(
         "<p><strong>Expiry date:</strong> " +
           escapeHtml(formatDisplayDate(c.package_expiry_date)) +
@@ -3156,6 +3596,28 @@
         "<table><thead><tr><th>Description</th><th class='td-num'>Charges</th><th class='td-num'>Payments Received</th><th class='td-num'>Outstanding Balance</th></tr></thead><tbody>"
       );
       appendDueStatementDetailRows(lines, c.id);
+    } else if (ctx.kind === "due_current") {
+      const parts = currentDueInvoiceParts(c.id);
+      lines.push(
+        "<table><thead><tr><th>Description</th><th class='td-num'>Amount</th></tr></thead><tbody>"
+      );
+      lines.push(
+        "<tr><td>Previous dues</td><td class='td-num'>" +
+          formatPKR(parts.previousDue) +
+          "</td></tr>"
+      );
+      lines.push(
+        "<tr><td>Current dues — " +
+          escapeHtml(parts.currentLabel || "Current dues") +
+          "</td><td class='td-num'>" +
+          formatPKR(parts.currentDue) +
+          "</td></tr>"
+      );
+      lines.push(
+        "<tr><td><strong>Total outstanding balance</strong></td><td class='td-num'><strong>" +
+          formatPKR(parts.totalDue) +
+          "</strong></td></tr>"
+      );
     } else {
       lines.push(
         "<table><thead><tr><th>Description</th><th class='td-num'>Amount</th></tr></thead><tbody>"
@@ -3309,7 +3771,7 @@
     if (ctx.kind === "receipt" && ctx.paymentDate) {
       dLab = ctx.paymentMode === "accrual" ? "Recharge date" : "Payment date";
       dVal = formatDisplayDate(ctx.paymentDate);
-    } else if (ctx.kind === "due") {
+    } else if (ctx.kind === "due" || ctx.kind === "due_current") {
       dLab = "Statement date";
       dVal = formatDisplayDate(todayISODate());
     } else if (ctx.kind === "summary") {
@@ -3320,6 +3782,9 @@
       dVal = formatDisplayDate(todayISODate());
     }
     lines.push(dLab + ": " + dVal);
+    if (ctx.kind === "receipt" && ctx.paymentMode === "receive") {
+      lines.push("Payment collected by: " + userDisplayName(ctx.collectedByUserId || (state.currentUser && state.currentUser.id)));
+    }
     let perT = "—";
     if (ctx.kind === "summary") {
       perT = monthTokenFromDate(new Date());
@@ -3328,12 +3793,25 @@
     }
     lines.push("Period / recharge month: " + perT);
     if (ctx.kind === "due") {
+      lines.push("Installation date: " + formatDisplayDate(c.installation_date));
+      lines.push("Expiry date: " + formatDisplayDate(c.package_expiry_date));
+    } else if (ctx.kind === "due_current") {
       lines.push("Expiry date: " + formatDisplayDate(c.package_expiry_date));
     } else {
       lines.push("Package expiry: " + formatDisplayDate(c.package_expiry_date));
     }
     if (ctx.kind === "due") {
       appendDueStatementPlainLines(lines, c.id);
+    } else if (ctx.kind === "due_current") {
+      const parts = currentDueInvoiceParts(c.id);
+      lines.push("Previous dues: " + formatPKR(parts.previousDue));
+      lines.push(
+        "Current dues - " +
+          (parts.currentLabel || "Current dues") +
+          ": " +
+          formatPKR(parts.currentDue)
+      );
+      lines.push("Total outstanding balance: " + formatPKR(parts.totalDue));
     } else if (ctx.kind === "summary") {
       lines.push("Monthly after discounts: PKR " + String(ctx.monthlyFinal));
       lines.push("Existing due: PKR " + String(ctx.existingDue));
@@ -3364,6 +3842,11 @@
   }
 
   function downloadInvoicePdf() {
+    const ctx = state.invoiceContext;
+    if (isPaymentReceiptContext(ctx)) {
+      downloadExactVisibleInvoicePdf();
+      return;
+    }
     const el = $("invoiceRoot");
     if (!el || !window.html2pdf) {
       toast(M.generic.pdfError, "err");
@@ -3376,17 +3859,146 @@
       });
   }
 
+  function createExactInvoiceDownloadSource(invoiceEl) {
+    const source = invoiceEl.cloneNode(true);
+    source.removeAttribute("id");
+    source.className = "invoice invoice-pdf-source";
+    source.style.position = "absolute";
+    source.style.left = "0";
+    source.style.top = "0";
+    source.style.width = "190mm";
+    source.style.maxWidth = "190mm";
+    source.style.maxHeight = "none";
+    source.style.height = "auto";
+    source.style.overflow = "visible";
+    source.style.margin = "0";
+    source.style.padding = "16px";
+    source.style.borderRadius = "0";
+    source.style.boxShadow = "none";
+    source.style.background = "#ffffff";
+    source.style.color = "#111827";
+    source.style.zIndex = "999999";
+    source.style.opacity = "1";
+    source.style.visibility = "visible";
+    source.style.transform = "none";
+    document.body.insertBefore(source, document.body.firstChild);
+    return source;
+  }
+
+  function invoicePrintDocumentHtml(invoiceHtml) {
+    return (
+      "<!doctype html><html><head><title>Invoice</title>" +
+      '<link rel="stylesheet" href="css/style.css" />' +
+      "<style>" +
+      "@page{size:A4;margin:10mm;}" +
+      "html,body{background:#fff!important;color:#111827!important;margin:0!important;padding:0!important;height:auto!important;}" +
+      ".invoice{box-shadow:none!important;border-radius:0!important;width:100%!important;max-width:190mm!important;margin:0 auto!important;padding:0!important;}" +
+      ".invoice table{width:100%!important;min-width:0!important;table-layout:auto!important;}" +
+      ".invoice th,.invoice td{font-size:12px!important;padding:7px 8px!important;}" +
+      ".invoice h3{font-size:18px!important;}" +
+      ".no-print,.invoice-header-actions{display:none!important;}" +
+      "</style>" +
+      "</head><body>" +
+      '<div class="invoice">' +
+      invoiceHtml +
+      "</div>" +
+      "</body></html>"
+    );
+  }
+
+  function openInvoicePrintWindow(message) {
+    const el = $("invoiceRoot");
+    if (!el) return;
+    const win = window.open("", "_blank", "width=900,height=700");
+    if (!win) {
+      toast("Allow popups to print the invoice.", "err");
+      return;
+    }
+    win.document.open();
+    win.document.write(invoicePrintDocumentHtml(el.innerHTML));
+    win.document.close();
+    setTimeout(function () {
+      try {
+        win.focus();
+        win.print();
+      } catch (e) {
+        toast("Could not open print dialog.", "err");
+      }
+    }, 500);
+    if (message) toast(message, "ok");
+  }
+
+  function printInvoice() {
+    openInvoicePrintWindow();
+  }
+
+  function isPaymentReceiptContext(ctx) {
+    return !!ctx && ctx.kind === "receipt" && ctx.paymentMode === "receive";
+  }
+
+  async function buildExactVisibleInvoicePdfBlob() {
+    const el = $("invoiceRoot");
+    const JsPDF = getJsPdfCtor();
+    if (!el || !JsPDF || !window.html2canvas) {
+      throw new Error("PDF capture library not ready. Refresh the page and try again.");
+    }
+    const canvas = await window.html2canvas(el, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: "#ffffff",
+      scrollX: 0,
+      scrollY: 0
+    });
+    const doc = new JsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+    const pageW = 210;
+    const pageH = 297;
+    const margin = 8;
+    const imgW = pageW - margin * 2;
+    const imgH = (canvas.height * imgW) / canvas.width;
+    const img = canvas.toDataURL("image/jpeg", 0.98);
+    let y = margin;
+    let remaining = imgH;
+    doc.addImage(img, "JPEG", margin, y, imgW, imgH);
+    remaining -= pageH - margin * 2;
+    while (remaining > 0) {
+      doc.addPage();
+      y = margin - (imgH - remaining);
+      doc.addImage(img, "JPEG", margin, y, imgW, imgH);
+      remaining -= pageH - margin * 2;
+    }
+    return doc.output("blob");
+  }
+
+  async function downloadExactVisibleInvoicePdf() {
+    try {
+      const ctx = state.invoiceContext || {};
+      const blob = await buildExactVisibleInvoicePdfBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = ((ctx && ctx.invoiceNo) || "payment-receipt") + ".pdf";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      toast(e.message || M.generic.pdfError, "err");
+    }
+  }
+
   async function shareInvoiceWhatsApp() {
     const ctx = state.invoiceContext;
     const el = $("invoiceRoot");
     if (!ctx || !el) return;
-    if (!window.html2pdf) {
+    if (!window.html2pdf && !isPaymentReceiptContext(ctx)) {
       toast(M.generic.pdfError, "err");
       return;
     }
     const filename = (ctx.invoiceNo || "invoice") + ".pdf";
     try {
-      const blob = await invoicePdfWorker(el).outputPdf("blob");
+      const blob = isPaymentReceiptContext(ctx)
+        ? await buildExactVisibleInvoicePdfBlob()
+        : await invoicePdfWorker(el).outputPdf("blob");
       if (!blob) throw new Error("no pdf");
 
       const file = new File([blob], filename, { type: "application/pdf" });
@@ -3453,16 +4065,183 @@
     }
   }
 
-  function invoicePdfWorker(el) {
+  function getJsPdfCtor() {
+    return (
+      (window.jspdf && window.jspdf.jsPDF) ||
+      window.jsPDF ||
+      null
+    );
+  }
+
+  function buildInvoiceJsPdf(ctx) {
+    const JsPDF = getJsPdfCtor();
+    if (!JsPDF) {
+      throw new Error("PDF library not ready. Refresh the page and try again.");
+    }
+    const doc = new JsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+    const pageWidth = 210;
+    const pageHeight = 297;
+    const margin = 12;
+    const usable = pageWidth - margin * 2;
+    const labelW = 64;
+    const valueW = usable - labelW;
+    let y = 12;
+    const rawLines = invoicePlainText(ctx)
+      .split("\n")
+      .filter(function (line) {
+        return line && line !== "— ISP Billing";
+      });
+    const title = rawLines.shift() || ctx.title || "Invoice";
+
+    function color(r, g, b) {
+      doc.setTextColor(r, g, b);
+    }
+
+    function footer() {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      color(100, 116, 139);
+      doc.text("Generated on " + formatDisplayDate(todayISODate()), pageWidth / 2, pageHeight - 8, {
+        align: "center"
+      });
+    }
+
+    function ensure(space) {
+      if (y + space <= pageHeight - 16) return;
+      footer();
+      doc.addPage();
+      y = 12;
+    }
+
+    doc.setFillColor(239, 246, 255);
+    doc.roundedRect(margin, y, usable, 18, 2, 2, "F");
+    doc.setDrawColor(191, 219, 254);
+    doc.roundedRect(margin, y, usable, 18, 2, 2, "S");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    color(15, 23, 42);
+    doc.text(title, pageWidth / 2, y + 7, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    color(71, 85, 105);
+    doc.text("Lasbela Link", pageWidth / 2, y + 13, { align: "center" });
+    y += 24;
+
+    rawLines.forEach(function (line, index) {
+      const idx = line.indexOf(":");
+      const isAmount = /PKR|Paid|Due|Outstanding|Amount|Total|Charges|Payment/i.test(line);
+      ensure(8);
+      if (idx > -1) {
+        const label = line.slice(0, idx);
+        const value = line.slice(idx + 1).trim();
+        const wrapped = doc.splitTextToSize(value || "-", valueW - 8);
+        const rowH = Math.max(7, wrapped.length * 4.1 + 3);
+        ensure(rowH);
+        if (isAmount) {
+          doc.setFillColor(224, 242, 254);
+          doc.setDrawColor(147, 197, 253);
+        } else {
+          doc.setFillColor(index % 2 === 0 ? 248 : 255, 250, 252);
+          doc.setDrawColor(226, 232, 240);
+        }
+        doc.roundedRect(margin, y, usable, rowH, 1.2, 1.2, "FD");
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.8);
+        color(51, 65, 85);
+        doc.text(label, margin + 3, y + 4.8);
+        doc.setFont("helvetica", isAmount ? "bold" : "normal");
+        doc.setFontSize(isAmount ? 9.3 : 8.8);
+        color(isAmount ? 30 : 15, isAmount ? 64 : 23, isAmount ? 175 : 42);
+        doc.text(wrapped, margin + labelW + 3, y + 4.8);
+        y += rowH + 1.2;
+      } else {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.6);
+        color(71, 85, 105);
+        const wrappedLine = doc.splitTextToSize(line, usable - 4);
+        doc.text(wrappedLine, margin + 2, y + 4);
+        y += Math.max(6, wrappedLine.length * 4.1);
+      }
+    });
+
+    footer();
+    return doc;
+  }
+
+  function buildInvoicePdfSafeHtml(ctx, fallbackHtml) {
+    if (!ctx || !ctx.customer) return fallbackHtml;
+    const rawLines = invoicePlainText(ctx)
+      .split("\n")
+      .filter(function (line) {
+        return line && line !== "— ISP Billing";
+      });
+    const title = rawLines.shift() || ctx.title || "Invoice";
+    const rows = rawLines
+      .map(function (line) {
+        const idx = line.indexOf(":");
+        if (idx === -1) {
+          return (
+            '<tr><td colspan="2" style="padding:5px 0;color:#334155;">' +
+            escapeHtml(line) +
+            "</td></tr>"
+          );
+        }
+        return (
+          '<tr><td style="width:42%;padding:5px 8px 5px 0;color:#475569;border-bottom:1px solid #e2e8f0;font-weight:700;">' +
+          escapeHtml(line.slice(0, idx)) +
+          '</td><td style="padding:5px 0;color:#0f172a;border-bottom:1px solid #e2e8f0;text-align:right;">' +
+          escapeHtml(line.slice(idx + 1).trim()) +
+          "</td></tr>"
+        );
+      })
+      .join("");
+
+    return (
+      '<div style="font-family:Segoe UI,Arial,sans-serif;color:#0f172a;background:#fff;">' +
+      '<h2 style="font-size:18px;margin:0 0 4px;color:#0f172a;text-align:center;">' +
+      escapeHtml(title) +
+      "</h2>" +
+      '<div style="height:2px;background:#dbeafe;margin:8px 0 10px;"></div>' +
+      '<table style="width:100%;border-collapse:collapse;font-size:11.5px;line-height:1.25;">' +
+      rows +
+      "</table>" +
+      '<p style="margin-top:10px;color:#64748b;font-size:10px;text-align:center;">Generated on ' +
+      escapeHtml(formatDisplayDate(todayISODate())) +
+      "</p>" +
+      "</div>"
+    );
+  }
+
+  function createInvoicePdfSource(html) {
+    const holder = document.createElement("div");
+    holder.className = "invoice";
+    holder.style.width = "620px";
+    holder.style.maxHeight = "none";
+    holder.style.height = "auto";
+    holder.style.overflow = "visible";
+    holder.style.margin = "0 auto";
+    holder.style.padding = "10px";
+    holder.style.borderRadius = "0";
+    holder.style.background = "#ffffff";
+    holder.style.color = "#111827";
+    holder.innerHTML = html;
+    document.body.appendChild(holder);
+    return holder;
+  }
+
+  function invoicePdfOptions() {
     const ctx = state.invoiceContext;
-    const opt = {
+    return {
       margin: 10,
       filename: ((ctx && ctx.invoiceNo) || "invoice") + ".pdf",
       image: { type: "jpeg", quality: 0.98 },
       html2canvas: { scale: 2 },
       jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
     };
-    return window.html2pdf().set(opt).from(el);
+  }
+
+  function invoicePdfWorker(el) {
+    return window.html2pdf().set(invoicePdfOptions()).from(el);
   }
 
   function reportHtmlToPdf(htmlInner, filename) {
@@ -3499,7 +4278,7 @@
     const sel = $("repCustomerSelect");
     if (!sel) return;
     const prev = sel.value;
-    const rows = state.customers
+    const rows = visibleCustomers()
       .slice()
       .sort(function (a, b) {
         return String(a.full_name || "").localeCompare(String(b.full_name || ""));
@@ -3537,7 +4316,7 @@
     const chRows = dueChargesForCustomer(customerId).sort(function (a, b) {
       return String(b.created_at || "").localeCompare(String(a.created_at || ""));
     });
-    const payRows = state.payments
+    const payRows = visibleCollectionPayments()
       .filter(function (p) {
         return p.customer_id === customerId;
       })
@@ -3667,10 +4446,10 @@
 
     lines.push("<h3>Payments (all time)</h3>");
     lines.push(
-      "<table><thead><tr><th>Date</th><th>Invoice</th><th>Paid</th><th>Total</th><th>Method</th><th>Partial</th><th>Recharge line</th><th>Notes</th></tr></thead><tbody>"
+      "<table><thead><tr><th>Date</th><th>Invoice</th><th>Paid</th><th>Total</th><th>Method</th><th>Agent</th><th>Partial</th><th>Recharge line</th><th>Notes</th></tr></thead><tbody>"
     );
     if (!payRows.length) {
-      lines.push("<tr><td colspan='8' class='muted'>No payments.</td></tr>");
+      lines.push("<tr><td colspan='9' class='muted'>No payments.</td></tr>");
     } else {
       payRows.forEach(function (p) {
         const partial =
@@ -3693,6 +4472,8 @@
             escapeHtml(
               String((p.payment_methods && p.payment_methods.method_name) || "")
             ) +
+            "</td><td>" +
+            escapeHtml(userDisplayName(p.collected_by_user_id)) +
             "</td><td>" +
             escapeHtml(partial) +
             "</td><td>" +
@@ -3837,7 +4618,51 @@
     openBillingSummaryInvoice(customerId);
   }
 
+  function currentDueInvoiceParts(customerId) {
+    const c = state.customers.find(function (x) {
+      return x.id === customerId;
+    });
+    const totalDue = roundMoney(c ? Number(c.due_amount || 0) : 0);
+    const openCharges = dueChargesForCustomer(customerId)
+      .filter(function (x) {
+        return Number(x.amount_remaining || 0) > 0.000001;
+      })
+      .sort(function (a, b) {
+        return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+      });
+    if (!openCharges.length) {
+      return {
+        previousDue: 0,
+        currentDue: totalDue,
+        currentLabel: "Current dues",
+        totalDue: totalDue
+      };
+    }
+    const currentCharge = openCharges[0];
+    const currentDue = roundMoney(Number(currentCharge.amount_remaining || 0));
+    return {
+      previousDue: roundMoney(Math.max(0, totalDue - currentDue)),
+      currentDue: currentDue,
+      currentLabel: dueChargeLineLabel(currentCharge),
+      totalDue: totalDue
+    };
+  }
+
   function openDueInvoice(customerId) {
+    const c = state.customers.find(function (x) {
+      return x.id === customerId;
+    });
+    if (!c) return;
+    openInvoiceModal({
+      title: "Current due invoice",
+      invoiceNo: nextInvoiceNumber(),
+      customer: c,
+      kind: "due_current",
+      amountDue: Number(c.due_amount || 0)
+    });
+  }
+
+  function openDueStatementInvoice(customerId) {
     const c = state.customers.find(function (x) {
       return x.id === customerId;
     });
@@ -3882,6 +4707,7 @@
       renderDiscounts();
       renderUsers();
       renderCollection();
+      renderAgentsPanel();
       renderReportsInline();
       renderDueLedgerCustomerSelect();
     } catch (e) {
@@ -3894,15 +4720,458 @@
     return s.length >= 10 ? s.slice(0, 10) : s;
   }
 
+  function visibleCollectionPayments() {
+    if (!isCollector()) return state.payments;
+    const uid = state.currentUser && state.currentUser.id;
+    return state.payments.filter(function (p) {
+      return p.collected_by_user_id === uid && canCollectorAccessCustomer(paymentCustomer(p));
+    });
+  }
+
+  function visibleAgentReceipts() {
+    if (!isCollector()) return state.agentCollectionReceipts || [];
+    const uid = state.currentUser && state.currentUser.id;
+    return (state.agentCollectionReceipts || []).filter(function (r) {
+      return r.agent_id === uid;
+    });
+  }
+
+  function agentCollectionStats() {
+    const byAgent = {};
+    const seedAgents = isCollector()
+      ? collectionAgents().filter(function (u) { return u.id === (state.currentUser && state.currentUser.id); })
+      : collectionAgents();
+    seedAgents.forEach(function (u) {
+      byAgent[u.id] = { agentId: u.id, collected: 0, received: 0 };
+    });
+    visibleCollectionPayments().forEach(function (p) {
+      const key = p.collected_by_user_id || "";
+      if (!byAgent[key]) byAgent[key] = { agentId: key, collected: 0, received: 0 };
+      byAgent[key].collected += Number(p.paid_amount || 0);
+    });
+    visibleAgentReceipts().forEach(function (r) {
+      const key = r.agent_id || "";
+      if (!byAgent[key]) byAgent[key] = { agentId: key, collected: 0, received: 0 };
+      byAgent[key].received += Number(r.amount || 0);
+    });
+    return Object.keys(byAgent)
+      .map(function (k) {
+        const row = byAgent[k];
+        row.balance = roundMoney(row.collected - row.received);
+        return row;
+      })
+      .sort(function (a, b) {
+        return userDisplayName(a.agentId).localeCompare(userDisplayName(b.agentId));
+      });
+  }
+
+  function renderAgentReceiptAgentOptions() {
+    const sel = $("agentReceiptAgent");
+    if (!sel) return;
+    const opts = ['<option value="">— Select agent —</option>'];
+    collectionAgents().forEach(function (u) {
+      opts.push(
+        '<option value="' +
+          escapeHtml(u.id) +
+          '">' +
+          escapeHtml((u.full_name || u.username || "User") + " (" + u.role + ")") +
+          "</option>"
+      );
+    });
+    sel.innerHTML = opts.join("");
+  }
+
+  function renderAgentCollectionSummary() {
+    const tb = $("tbodyAgentCollectionSummary");
+    if (!tb) return;
+    const rows = agentCollectionStats();
+    if (!rows.length) {
+      tb.innerHTML = "<tr><td colspan='4' class='muted'>No agent collections yet.</td></tr>";
+      return;
+    }
+    tb.innerHTML = rows
+      .map(function (r) {
+        return (
+          "<tr><td>" +
+          escapeHtml(userDisplayName(r.agentId)) +
+          "</td><td class='td-num'>" +
+          formatPKR(r.collected) +
+          "</td><td class='td-num'>" +
+          formatPKR(r.received) +
+          "</td><td class='td-num'>" +
+          formatPKR(r.balance) +
+          "</td></tr>"
+        );
+      })
+      .join("");
+  }
+
+  function renderAgentReceipts() {
+    const tb = $("tbodyAgentReceipts");
+    if (!tb) return;
+    const rows = visibleAgentReceipts().slice().sort(function (a, b) {
+      const da = String(a.received_date || "");
+      const db = String(b.received_date || "");
+      if (da !== db) return db.localeCompare(da);
+      return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+    });
+    if (!rows.length) {
+      tb.innerHTML = "<tr><td colspan='5' class='muted'>No handover records yet.</td></tr>";
+      return;
+    }
+    tb.innerHTML = rows
+      .map(function (r) {
+        return (
+          "<tr><td>" +
+          escapeHtml(formatDisplayDate(r.received_date)) +
+          "</td><td>" +
+          escapeHtml(userDisplayName(r.agent_id)) +
+          "</td><td class='td-num'>" +
+          formatPKR(r.amount) +
+          "</td><td>" +
+          escapeHtml(userDisplayName(r.received_by_user_id)) +
+          "</td><td>" +
+          escapeHtml(r.notes || "—") +
+          "</td></tr>"
+        );
+      })
+      .join("");
+  }
+
+  function renderAgentCollectionPanel() {
+    renderAgentReceiptAgentOptions();
+    renderAgentCollectionSummary();
+    renderAgentReceipts();
+    const dt = $("agentReceiptDate");
+    if (dt && !dt.value) dt.value = todayISODate();
+  }
+
+  async function insertAgentCollectionReceipt(agentId, amount, date, notes) {
+    return getClient().from("agent_collection_receipts").insert({
+      agent_id: agentId,
+      received_by_user_id: state.currentUser && state.currentUser.id,
+      amount: amount,
+      received_date: date,
+      notes: notes || null
+    }).select();
+  }
+
+  function buildAgentHandoverReceiptHtml(ctx) {
+    const lines = [];
+    lines.push("<h3>Agent handover receipt</h3>");
+    lines.push("<p class='muted'>Receipt: <strong>" + escapeHtml(ctx.receiptNo) + "</strong></p>");
+    lines.push("<hr/>");
+    lines.push("<p><strong>Agent:</strong> " + escapeHtml(userDisplayName(ctx.agentId)) + "</p>");
+    lines.push("<p><strong>Received by:</strong> " + escapeHtml(userDisplayName(ctx.receivedByUserId)) + "</p>");
+    lines.push("<p><strong>Received date:</strong> " + escapeHtml(formatDisplayDate(ctx.receivedDate)) + "</p>");
+    lines.push("<table><thead><tr><th>Description</th><th class='td-num'>Amount</th></tr></thead><tbody>");
+    lines.push("<tr><td>Cash/payment handover from collection agent</td><td class='td-num'><strong>" + escapeHtml(formatPKR(ctx.amount)) + "</strong></td></tr>");
+    lines.push("</tbody></table>");
+    if (ctx.notes) {
+      lines.push("<p><strong>Notes:</strong> " + escapeHtml(ctx.notes) + "</p>");
+    }
+    lines.push("<p class='muted invoice-generated'>Generated on " + escapeHtml(formatDisplayDate(todayISODate())) + "</p>");
+    return lines.join("");
+  }
+
+  function openAgentHandoverReceipt(ctx) {
+    state.invoiceContext = {
+      kind: "agent_handover",
+      invoiceNo: ctx.receiptNo,
+      title: "Agent handover receipt"
+    };
+    const title = $("invoiceModalTitle");
+    const root = $("invoiceRoot");
+    if (title) title.textContent = "Agent handover receipt";
+    if (root) root.innerHTML = buildAgentHandoverReceiptHtml(ctx);
+    openBackdrop($("modalInvoice"));
+  }
+
+  async function saveAgentCollectionReceipt() {
+    if (!requireAdminAction()) return;
+    const agentId = $("agentReceiptAgent") ? $("agentReceiptAgent").value : "";
+    const amount = Number($("agentReceiptAmount") && $("agentReceiptAmount").value);
+    const date = ($("agentReceiptDate") && $("agentReceiptDate").value) || todayISODate();
+    const notes = ($("agentReceiptNotes") && $("agentReceiptNotes").value.trim()) || "";
+    if (!agentId) {
+      toast("Select an agent.", "err");
+      return;
+    }
+    if (!(amount > 0)) {
+      toast("Enter a positive amount.", "err");
+      return;
+    }
+    if (!parseISODateLocal(date)) {
+      toast("Select a valid received date.", "err");
+      return;
+    }
+    const res = await insertAgentCollectionReceipt(agentId, amount, date, notes);
+    if (res.error) {
+      toast(res.error.message + " Run migration_agent_collections.sql if this table is missing.", "err");
+      return;
+    }
+    ["agentReceiptAmount", "agentReceiptNotes"].forEach(function (id) {
+      const el = $(id);
+      if (el) el.value = "";
+    });
+    toast("Agent collection received.", "ok");
+    await refresh();
+    openAgentHandoverReceipt({
+      receiptNo: "AGENT-" + Date.now(),
+      agentId: agentId,
+      receivedByUserId: state.currentUser && state.currentUser.id,
+      amount: amount,
+      receivedDate: date,
+      notes: notes
+    });
+  }
+
+  function selectedManageAgentId() {
+    const sel = $("agentManageSelect");
+    return sel && sel.value ? sel.value : "";
+  }
+
+  function renderAgentManageOptions() {
+    const sel = $("agentManageSelect");
+    if (!sel) return;
+    const prev = sel.value;
+    const agents = collectionAgents();
+    sel.innerHTML = agents.length
+      ? agents.map(function (u) {
+          return (
+            '<option value="' +
+            escapeHtml(u.id) +
+            '">' +
+            escapeHtml((u.full_name || u.username || "User") + " (" + u.role + ")") +
+            "</option>"
+          );
+        }).join("")
+      : '<option value="">No agents</option>';
+    if (prev && agents.some(function (u) { return u.id === prev; })) sel.value = prev;
+  }
+
+  function renderAgentAreaAccessList() {
+    const root = $("agentAreaAccessList");
+    if (!root) return;
+    const agentId = selectedManageAgentId();
+    if (!agentId) {
+      root.innerHTML = '<p class="muted">Select an agent.</p>';
+      return;
+    }
+    const allowed = agentAllowedAreaIds(agentId);
+    const subs = state.areas
+      .filter(function (a) { return a.parent_area_id; })
+      .sort(function (a, b) { return areaLabelTree(a).localeCompare(areaLabelTree(b)); });
+    if (!subs.length) {
+      root.innerHTML = '<p class="muted">Create sub-areas first.</p>';
+      return;
+    }
+    root.innerHTML = subs.map(function (a) {
+      return (
+        '<label class="agent-area-option"><input type="checkbox" value="' +
+        escapeHtml(a.id) +
+        '"' +
+        (allowed.indexOf(a.id) !== -1 ? " checked" : "") +
+        " /> " +
+        escapeHtml(areaLabelTree(a)) +
+        "</label>"
+      );
+    }).join("");
+  }
+
+  function agentPayments(agentId) {
+    return state.payments.filter(function (p) {
+      return p.collected_by_user_id === agentId;
+    });
+  }
+
+  function renderAgentManageSummary() {
+    const root = $("agentManageSummary");
+    if (!root) return;
+    const agentId = selectedManageAgentId();
+    if (!agentId) {
+      root.innerHTML = '<p class="muted">Select an agent.</p>';
+      return;
+    }
+    const collected = agentPayments(agentId).reduce(function (sum, p) {
+      return sum + Number(p.paid_amount || 0);
+    }, 0);
+    const received = state.agentCollectionReceipts
+      .filter(function (r) { return r.agent_id === agentId; })
+      .reduce(function (sum, r) { return sum + Number(r.amount || 0); }, 0);
+    const balance = roundMoney(collected - received);
+    root.innerHTML =
+      '<div class="grid stats compact-stats">' +
+      '<div class="card"><div class="label">Collected</div><div class="value">' +
+      escapeHtml(formatPKR(collected).replace("PKR ", "")) +
+      "</div></div>" +
+      '<div class="card"><div class="label">Handed over</div><div class="value">' +
+      escapeHtml(formatPKR(received).replace("PKR ", "")) +
+      "</div></div>" +
+      '<div class="card"><div class="label">Balance with agent</div><div class="value">' +
+      escapeHtml(formatPKR(balance).replace("PKR ", "")) +
+      "</div></div></div>";
+  }
+
+  function renderAgentManagePayments() {
+    const tb = $("tbodyAgentManagePayments");
+    if (!tb) return;
+    const agentId = selectedManageAgentId();
+    const rows = agentId
+      ? agentPayments(agentId).slice().sort(function (a, b) {
+          return String(paymentDateISO(b)).localeCompare(String(paymentDateISO(a)));
+        })
+      : [];
+    if (!rows.length) {
+      tb.innerHTML = "<tr><td colspan='5' class='muted'>No collections for this agent.</td></tr>";
+      return;
+    }
+    tb.innerHTML = rows.map(function (p) {
+      return (
+        "<tr><td>" +
+        escapeHtml(formatDisplayDate(paymentDateISO(p))) +
+        "</td><td>" +
+        escapeHtml(String(p.invoice_number || "")) +
+        "</td><td>" +
+        escapeHtml(String((p.customers && p.customers.full_name) || "")) +
+        "</td><td class='td-num'>" +
+        escapeHtml(formatPKR(p.paid_amount)) +
+        "</td><td>" +
+        escapeHtml(String((p.payment_methods && p.payment_methods.method_name) || "")) +
+        "</td></tr>"
+      );
+    }).join("");
+  }
+
+  function renderAgentsPanel() {
+    if (!isAdminUser()) return;
+    renderAgentManageOptions();
+    renderAgentAreaAccessList();
+    renderAgentManageSummary();
+    renderAgentManagePayments();
+    const dt = $("agentManageReceiptDate");
+    if (dt && !dt.value) dt.value = todayISODate();
+  }
+
+  async function saveAgentAreaAccess() {
+    if (!requireAdminAction()) return;
+    const agentId = selectedManageAgentId();
+    if (!agentId) {
+      toast("Select an agent.", "err");
+      return;
+    }
+    const checked = Array.prototype.slice
+      .call(document.querySelectorAll("#agentAreaAccessList input[type='checkbox']:checked"))
+      .map(function (el) { return el.value; });
+    const sb = getClient();
+    const del = await sb.from("agent_area_access").delete().eq("agent_id", agentId);
+    if (del.error) {
+      toast(del.error.message + " Run migration_agent_collections.sql if this table is missing.", "err");
+      return;
+    }
+    if (checked.length) {
+      const ins = await sb.from("agent_area_access").insert(checked.map(function (areaId) {
+        return { agent_id: agentId, area_id: areaId };
+      }));
+      if (ins.error) {
+        toast(ins.error.message, "err");
+        return;
+      }
+    }
+    toast("Agent area access saved.", "ok");
+    await refresh();
+  }
+
+  async function saveAgentManageReceipt() {
+    if (!requireAdminAction()) return;
+    const agentId = selectedManageAgentId();
+    const amount = Number($("agentManageReceiptAmount") && $("agentManageReceiptAmount").value);
+    const date = ($("agentManageReceiptDate") && $("agentManageReceiptDate").value) || todayISODate();
+    const notes = ($("agentManageReceiptNotes") && $("agentManageReceiptNotes").value.trim()) || "";
+    if (!agentId) {
+      toast("Select an agent.", "err");
+      return;
+    }
+    if (!(amount > 0)) {
+      toast("Enter a positive amount.", "err");
+      return;
+    }
+    if (!parseISODateLocal(date)) {
+      toast("Select a valid received date.", "err");
+      return;
+    }
+    const res = await insertAgentCollectionReceipt(agentId, amount, date, notes);
+    if (res.error) {
+      toast(res.error.message + " Run migration_agent_collections.sql if this table is missing.", "err");
+      return;
+    }
+    ["agentManageReceiptAmount", "agentManageReceiptNotes"].forEach(function (id) {
+      const el = $(id);
+      if (el) el.value = "";
+    });
+    toast("Agent handover receipt saved.", "ok");
+    await refresh();
+    openAgentHandoverReceipt({
+      receiptNo: "AGENT-" + Date.now(),
+      agentId: agentId,
+      receivedByUserId: state.currentUser && state.currentUser.id,
+      amount: amount,
+      receivedDate: date,
+      notes: notes
+    });
+  }
+
+  function openCollectionPaymentInvoice(paymentId) {
+    const p = state.payments.find(function (x) {
+      return x.id === paymentId;
+    });
+    if (!p) {
+      toast("Payment record not found.", "err");
+      return;
+    }
+    const fullCustomer =
+      paymentCustomer(p) ||
+      Object.assign(
+        {
+          id: p.customer_id,
+          phone: "",
+          address: "",
+          package_expiry_date: p.new_expiry_date || p.old_expiry_date || ""
+        },
+        p.customers || {}
+      );
+    const dueBefore = Number(p.total_amount || 0);
+    const paid = Number(p.paid_amount || 0);
+    const dueAfter = roundMoney(dueBefore - paid);
+    openInvoiceModal({
+      title: "Payment receipt",
+      invoiceNo: p.invoice_number || "PAY-" + String(paymentId).slice(0, 8),
+      customer: fullCustomer,
+      kind: "receipt",
+      paymentMode: "receive",
+      existingDueBefore: dueBefore,
+      paidAmount: paid,
+      newDueAfter: dueAfter,
+      oldExpiry: p.old_expiry_date || fullCustomer.package_expiry_date || "",
+      newExpiry: p.new_expiry_date || fullCustomer.package_expiry_date || "",
+      rechargeMonth: p.recharge_month || "",
+      paymentDate: paymentDateISO(p),
+      totalBill: dueBefore,
+      collectedByUserId: p.collected_by_user_id
+    });
+  }
+
   function renderCollection() {
     const root = $("collectionWeekRoot");
     if (!root) return;
-    if (!state.payments.length) {
+    renderAgentCollectionPanel();
+    const visiblePayments = visibleCollectionPayments();
+    if (!visiblePayments.length) {
       root.innerHTML = '<p class="muted">No payment records yet.</p>';
       return;
     }
     const byDay = {};
-    state.payments.forEach(function (p) {
+    visiblePayments.forEach(function (p) {
       const d = paymentDateISO(p);
       if (!d) return;
       if (!byDay[d]) byDay[d] = [];
@@ -3958,19 +5227,26 @@
             escapeHtml(
               String((p.payment_methods && p.payment_methods.method_name) || "")
             ) +
+            (!isCollector()
+              ? "</td><td>" + escapeHtml(userDisplayName(p.collected_by_user_id))
+              : "") +
             "</td><td>" +
             escapeHtml(partial) +
+            '</td><td class="no-print">' +
+            '<button type="button" class="btn ghost" data-col-pay-invoice="' +
+            escapeHtml(String(p.id)) +
+            '"><i class="fa-solid fa-file-invoice"></i> Invoice</button>' +
           (!isCollector()
-            ? '</td><td class="no-print">' +
-              '<button type="button" class="btn danger" data-col-pay-del="' +
+            ? ' <button type="button" class="btn danger" data-col-pay-del="' +
               escapeHtml(String(p.id)) +
-              '">Delete</button></td></tr>'
-            : "</td></tr>")
+              '">Delete</button>'
+            : "") +
+            "</td></tr>"
           );
         })
         .join("");
       parts.push(
-        '<div class="collection-day">' +
+        '<div class="collection-day" data-collection-day="' + escapeHtml(iso) + '">' +
           '<div class="collection-day-head">' +
           '<h3 class="collection-day-title">' +
           escapeHtml(title) +
@@ -3980,8 +5256,10 @@
           "</div></div>" +
           '<div class="table-wrap">' +
           "<table><thead><tr>" +
-          "<th>Invoice</th><th>Customer</th><th>User ID</th><th>Paid</th><th>Method</th><th>Partial</th>" +
-          (!isCollector() ? "<th class='no-print'>Actions</th>" : "") +
+          "<th>Invoice</th><th>Customer</th><th>User ID</th><th>Paid</th><th>Method</th>" +
+          (!isCollector() ? "<th>Agent</th>" : "") +
+          "<th>Partial</th>" +
+          "<th class='no-print'>Actions</th>" +
           "</tr></thead><tbody>" +
           tableBody +
           "</tbody></table></div></div>"
@@ -4083,7 +5361,7 @@
         ").";
     }
 
-    const custRows = state.customers
+    const custRows = visibleCustomers()
       .filter(function (c) {
         if (!c.created_at) return false;
         const cd = String(c.created_at).slice(0, 10);
@@ -4120,7 +5398,7 @@
         "<tr><td colspan='8' class='muted'>No customers created in this range.</td></tr>";
     }
 
-    const expRows = state.customers
+    const expRows = visibleCustomers()
       .filter(function (c) {
         if (!c.package_expiry_date) return false;
         return c.package_expiry_date >= r.from && c.package_expiry_date <= r.to;
@@ -4152,7 +5430,7 @@
         "<tr><td colspan='5' class='muted'>No expiries in this range.</td></tr>";
     }
 
-    const dueRows = state.customers
+    const dueRows = visibleCustomers()
       .filter(function (c) {
         return Number(c.due_amount || 0) > 0;
       })
@@ -4197,7 +5475,7 @@
   function exportCollectionReport() {
     const r = reportRange();
     if (!r) return;
-    const rows = state.payments.filter(function (p) {
+    const rows = visibleCollectionPayments().filter(function (p) {
       const pd = paymentDateISO(p);
       return pd >= r.from && pd <= r.to;
     });
@@ -4210,6 +5488,7 @@
       "total_amount",
       "is_partial",
       "method",
+      "agent",
       "recharge_month",
       "transaction_id",
       "notes"
@@ -4226,6 +5505,7 @@
           csvEscape(p.total_amount),
           csvEscape(p.is_partial),
           csvEscape((p.payment_methods && p.payment_methods.method_name) || ""),
+          csvEscape(userDisplayName(p.collected_by_user_id)),
           csvEscape(p.recharge_month),
           csvEscape(p.transaction_id),
           csvEscape(p.notes)
@@ -4239,7 +5519,7 @@
   function exportCustomerReport() {
     const r = reportRange();
     if (!r) return;
-    const rows = state.customers.filter(function (c) {
+    const rows = visibleCustomers().filter(function (c) {
       if (!c.created_at) return false;
       const cd = String(c.created_at).slice(0, 10);
       return cd >= r.from && cd <= r.to;
@@ -4284,7 +5564,7 @@
   function exportExpiryReport() {
     const r = reportRange();
     if (!r) return;
-    const rows = state.customers.filter(function (c) {
+    const rows = visibleCustomers().filter(function (c) {
       if (!c.package_expiry_date) return false;
       return c.package_expiry_date >= r.from && c.package_expiry_date <= r.to;
     });
@@ -4306,7 +5586,7 @@
   }
 
   function exportDueReport() {
-    const rows = state.customers.filter(function (c) {
+    const rows = visibleCustomers().filter(function (c) {
       return Number(c.due_amount || 0) > 0;
     });
     const head = ["user_id", "full_name", "phone", "due_amount", "expiry", "status"];
@@ -4330,7 +5610,7 @@
   function exportCollectionReportPdf() {
     const r = reportRange();
     if (!r) return;
-    const rows = state.payments
+    const rows = visibleCollectionPayments()
       .filter(function (p) {
         const pd = paymentDateISO(p);
         return pd >= r.from && pd <= r.to;
@@ -4348,10 +5628,10 @@
     const parts = [
       "<h2>Collection report</h2>",
       "<p class=\"muted\">" + reportRangeSubtitle(r) + "</p>",
-      "<table><thead><tr><th>Date</th><th>Invoice</th><th>Customer</th><th>User ID</th><th>Paid</th><th>Method</th><th>Partial</th><th>Recharge line</th><th>Notes</th></tr></thead><tbody>"
+      "<table><thead><tr><th>Date</th><th>Invoice</th><th>Customer</th><th>User ID</th><th>Paid</th><th>Method</th><th>Agent</th><th>Partial</th><th>Recharge line</th><th>Notes</th></tr></thead><tbody>"
     ];
     if (!rows.length) {
-      parts.push("<tr><td colspan='9' class='muted'>No payments in range.</td></tr>");
+      parts.push("<tr><td colspan='10' class='muted'>No payments in range.</td></tr>");
     } else {
       rows.forEach(function (p) {
         const cust = p.customers || {};
@@ -4378,6 +5658,8 @@
               String((p.payment_methods && p.payment_methods.method_name) || "")
             ) +
             "</td><td>" +
+            escapeHtml(userDisplayName(p.collected_by_user_id)) +
+            "</td><td>" +
             escapeHtml(partial) +
             "</td><td>" +
             escapeHtml(p.recharge_month || "—") +
@@ -4398,7 +5680,7 @@
   function exportCustomerReportPdf() {
     const r = reportRange();
     if (!r) return;
-    const rows = state.customers
+    const rows = visibleCustomers()
       .filter(function (c) {
         if (!c.created_at) return false;
         const cd = String(c.created_at).slice(0, 10);
@@ -4448,7 +5730,7 @@
   function exportExpiryReportPdf() {
     const r = reportRange();
     if (!r) return;
-    const rows = state.customers
+    const rows = visibleCustomers()
       .filter(function (c) {
         if (!c.package_expiry_date) return false;
         return c.package_expiry_date >= r.from && c.package_expiry_date <= r.to;
@@ -4491,7 +5773,7 @@
   }
 
   function exportDueReportPdf() {
-    const rows = state.customers
+    const rows = visibleCustomers()
       .filter(function (c) {
         return Number(c.due_amount || 0) > 0;
       })
@@ -4551,6 +5833,11 @@
       window.ISPAuth.logout();
     });
     document.body.addEventListener("click", function (ev) {
+      const dash = ev.target.closest("[data-dashboard-link]");
+      if (dash) {
+        openDashboardLink(dash.getAttribute("data-dashboard-link"));
+        return;
+      }
       const pick = ev.target.closest("[data-show-picker]");
       if (!pick) return;
       const id = pick.getAttribute("data-show-picker");
@@ -4567,18 +5854,14 @@
         inp.focus();
       }
     });
+    document.body.addEventListener("keydown", function (ev) {
+      if (ev.key !== "Enter" && ev.key !== " ") return;
+      const dash = ev.target.closest && ev.target.closest("[data-dashboard-link]");
+      if (!dash) return;
+      ev.preventDefault();
+      openDashboardLink(dash.getAttribute("data-dashboard-link"));
+    });
     document.body.addEventListener("click", closeByDataAttr);
-
-    onIf("qaAddCustomer", "click", function () {
-      setView("customers");
-      openCustomerModal(null);
-    });
-    onIf("qaExportCustomers", "click", exportCustomersCsv);
-    onIf("qaImportCustomers", "click", function () {
-      setView("customers");
-      const inp = $("custImportInput");
-      if (inp) inp.click();
-    });
 
     onIf("btnAddCustomer", "click", function () {
       openCustomerModal(null);
@@ -4637,10 +5920,12 @@
       const idDetail = t.getAttribute("data-due-detail");
       const idPay = t.getAttribute("data-due-pay");
       const idInv = t.getAttribute("data-due-inv");
+      const idStatement = t.getAttribute("data-due-statement");
       const idWa = t.getAttribute("data-due-wa");
       if (idDetail) openDueDetailModal(idDetail);
       if (idPay) openPaymentModal(idPay, "receive");
       if (idInv) openDueInvoice(idInv);
+      if (idStatement) openDueStatementInvoice(idStatement);
       if (idWa) duesWhatsApp(idWa);
     });
 
@@ -4883,6 +6168,11 @@
     const colRoot = $("collectionWeekRoot");
     if (colRoot) {
       colRoot.addEventListener("click", async function (ev) {
+        const inv = ev.target.closest("button[data-col-pay-invoice]");
+        if (inv) {
+          openCollectionPaymentInvoice(inv.getAttribute("data-col-pay-invoice"));
+          return;
+        }
         const b = ev.target.closest("button[data-col-pay-del]");
         if (!b) return;
         const id = b.getAttribute("data-col-pay-del");
@@ -4966,10 +6256,30 @@
     });
 
     onIf("btnInvoicePdf", "click", downloadInvoicePdf);
+    onIf("btnInvoicePrint", "click", printInvoice);
     onIf("btnInvoiceWa", "click", shareInvoiceWhatsApp);
 
     onIf("btnChangePassword", "click", changeCurrentUserPassword);
     onIf("btnCreateAgent", "click", createCollectionAgentAccount);
+    onIf("btnSaveUserAccount", "click", saveUserAccount);
+    const usersBody = $("tbodyUsers");
+    if (usersBody) {
+      usersBody.addEventListener("click", async function (ev) {
+        const edit = ev.target.closest("[data-user-edit]");
+        if (edit) {
+          openUserAccountModal(edit.getAttribute("data-user-edit"));
+          return;
+        }
+        const del = ev.target.closest("[data-user-del]");
+        if (del) {
+          await deleteUserAccount(del.getAttribute("data-user-del"));
+        }
+      });
+    }
+    onIf("btnSaveAgentReceipt", "click", saveAgentCollectionReceipt);
+    onIf("agentManageSelect", "change", renderAgentsPanel);
+    onIf("btnSaveAgentAreas", "click", saveAgentAreaAccess);
+    onIf("btnAgentManageReceipt", "click", saveAgentManageReceipt);
   }
 
   document.addEventListener("DOMContentLoaded", async function () {
