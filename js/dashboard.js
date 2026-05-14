@@ -13,6 +13,13 @@
     agentAreaAccess: [],
     dueCharges: [],
     paymentAllocations: [],
+    cashAccounts: [],
+    cashTransactions: [],
+    employees: [],
+    salaryRecords: [],
+    expenseRecords: [],
+    materialPurchases: [],
+    dailyWageRecords: [],
     currentUser: null,
     invoiceContext: null,
     payContext: null,
@@ -1466,6 +1473,12 @@
       }
       if (c) c.due_amount = newDue;
     }
+    const delCash = await sb
+      .from("cash_transactions")
+      .delete()
+      .eq("source_type", "payment")
+      .eq("source_id", paymentId);
+    if (delCash.error) console.warn(delCash.error);
     const delP = await sb.from("payments").delete().eq("id", paymentId);
     if (delP.error) {
       toast(delP.error.message, "err");
@@ -1616,7 +1629,14 @@
       acrRes,
       aaaRes,
       dcRes,
-      pdaRes
+      pdaRes,
+      cashAcctRes,
+      cashTxnRes,
+      empRes,
+      salaryRes,
+      expRes,
+      matRes,
+      wageRes
     ] = await Promise.all([
       sb.from("customers").select(
         "*, areas ( id, area_name, parent_area_id ), packages ( id, package_name, price, speed_mbps )"
@@ -1635,7 +1655,14 @@
       sb.from("agent_collection_receipts").select("*").order("received_date", { ascending: false }),
       sb.from("agent_area_access").select("*"),
       sb.from("customer_due_charges").select("*").order("created_at", { ascending: true }),
-      sb.from("payment_due_allocations").select("*")
+      sb.from("payment_due_allocations").select("*"),
+      sb.from("cash_accounts").select("*").order("account_name"),
+      sb.from("cash_transactions").select("*").order("transaction_date", { ascending: false }).order("created_at", { ascending: false }),
+      sb.from("employees").select("*").order("full_name"),
+      sb.from("salary_records").select("*").order("paid_date", { ascending: false }),
+      sb.from("expense_records").select("*").order("expense_date", { ascending: false }),
+      sb.from("material_purchases").select("*").order("purchase_date", { ascending: false }),
+      sb.from("daily_wage_records").select("*").order("work_date", { ascending: false })
     ]);
 
     if (custRes.error) throw custRes.error;
@@ -1676,6 +1703,48 @@
       console.warn(pdaRes.error);
     } else {
       state.paymentAllocations = pdaRes.data || [];
+    }
+    if (cashAcctRes.error) {
+      state.cashAccounts = [];
+      console.warn(cashAcctRes.error);
+    } else {
+      state.cashAccounts = cashAcctRes.data || [];
+    }
+    if (cashTxnRes.error) {
+      state.cashTransactions = [];
+      console.warn(cashTxnRes.error);
+    } else {
+      state.cashTransactions = cashTxnRes.data || [];
+    }
+    if (empRes.error) {
+      state.employees = [];
+      console.warn(empRes.error);
+    } else {
+      state.employees = empRes.data || [];
+    }
+    if (salaryRes.error) {
+      state.salaryRecords = [];
+      console.warn(salaryRes.error);
+    } else {
+      state.salaryRecords = salaryRes.data || [];
+    }
+    if (expRes.error) {
+      state.expenseRecords = [];
+      console.warn(expRes.error);
+    } else {
+      state.expenseRecords = expRes.data || [];
+    }
+    if (matRes.error) {
+      state.materialPurchases = [];
+      console.warn(matRes.error);
+    } else {
+      state.materialPurchases = matRes.data || [];
+    }
+    if (wageRes.error) {
+      state.dailyWageRecords = [];
+      console.warn(wageRes.error);
+    } else {
+      state.dailyWageRecords = wageRes.data || [];
     }
 
     await syncAllCustomerStatus(sb);
@@ -2342,6 +2411,501 @@
       .join("");
   }
 
+  function labelFromCode(code) {
+    return String(code || "")
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, function (m) {
+        return m.toUpperCase();
+      });
+  }
+
+  function cashAccountById(id) {
+    return (state.cashAccounts || []).find(function (a) {
+      return a.id === id;
+    });
+  }
+
+  function cashAccountLabel(accountId) {
+    const a = cashAccountById(accountId);
+    return a ? a.account_name : "—";
+  }
+
+  function cashAccountBalance(accountId) {
+    const a = cashAccountById(accountId);
+    let balance = a ? Number(a.opening_balance || 0) : 0;
+    (state.cashTransactions || []).forEach(function (t) {
+      if (t.account_id !== accountId) return;
+      const amt = Number(t.amount || 0);
+      balance += t.transaction_type === "income" ? amt : -amt;
+    });
+    return roundMoney(balance);
+  }
+
+  function buildCashAccountOptions(sel, includeBlank) {
+    if (!sel) return;
+    const prev = sel.value;
+    const accounts = (state.cashAccounts || []).filter(function (a) {
+      return a.is_active !== false;
+    });
+    const opts = includeBlank ? ['<option value="">— Select account —</option>'] : [];
+    accounts.forEach(function (a) {
+      opts.push(
+        '<option value="' +
+          escapeHtml(a.id) +
+          '">' +
+          escapeHtml(a.account_name + " (" + labelFromCode(a.account_type) + ")") +
+          "</option>"
+      );
+    });
+    sel.innerHTML = opts.join("");
+    if (prev && accounts.some(function (a) { return a.id === prev; })) sel.value = prev;
+    else if (accounts.length === 1) sel.value = accounts[0].id;
+  }
+
+  function buildEmployeeOptions(sel) {
+    if (!sel) return;
+    const prev = sel.value;
+    const employees = (state.employees || []).filter(function (e) {
+      return e.is_active !== false;
+    });
+    const opts = ['<option value="">— Select employee —</option>'];
+    employees.forEach(function (e) {
+      opts.push('<option value="' + escapeHtml(e.id) + '">' + escapeHtml(e.full_name) + "</option>");
+    });
+    sel.innerHTML = opts.join("");
+    if (prev && employees.some(function (e) { return e.id === prev; })) sel.value = prev;
+  }
+
+  function activeCashAccountIds() {
+    return (state.cashAccounts || [])
+      .filter(function (a) { return a.is_active !== false; })
+      .map(function (a) { return a.id; });
+  }
+
+  function renderCashFlow() {
+    renderCashAccountSelectors();
+    buildEmployeeOptions($("salaryEmployee"));
+    ["cashIncomeDate", "expenseDate", "salaryDate", "materialDate", "wageDate"].forEach(function (id) {
+      const el = $(id);
+      if (el && !el.value) el.value = todayISODate();
+    });
+
+    const accounts = state.cashAccounts || [];
+    const txns = state.cashTransactions || [];
+    const income = txns.reduce(function (sum, t) {
+      return sum + (t.transaction_type === "income" ? Number(t.amount || 0) : 0);
+    }, 0);
+    const expense = txns.reduce(function (sum, t) {
+      return sum + (t.transaction_type === "expense" ? Number(t.amount || 0) : 0);
+    }, 0);
+    const totalBalance = accounts.reduce(function (sum, a) {
+      return sum + cashAccountBalance(a.id);
+    }, 0);
+    if ($("statCashBalance")) $("statCashBalance").textContent = formatPKR(totalBalance);
+    if ($("statCashIncome")) $("statCashIncome").textContent = formatPKR(income);
+    if ($("statCashExpense")) $("statCashExpense").textContent = formatPKR(expense);
+
+    const tbAccounts = $("tbodyCashAccounts");
+    if (tbAccounts) {
+      tbAccounts.innerHTML = accounts.length
+        ? accounts
+            .map(function (a) {
+              return (
+                "<tr><td>" +
+                escapeHtml(a.account_name) +
+                "</td><td>" +
+                escapeHtml(labelFromCode(a.account_type)) +
+                "</td><td class='td-num'>" +
+                formatPKR(a.opening_balance) +
+                "</td><td class='td-num'><strong>" +
+                formatPKR(cashAccountBalance(a.id)) +
+                "</strong></td></tr>"
+              );
+            })
+            .join("")
+        : '<tr><td colspan="4" class="muted">No cash accounts yet.</td></tr>';
+    }
+
+    const tbEmp = $("tbodyEmployees");
+    if (tbEmp) {
+      const employees = state.employees || [];
+      tbEmp.innerHTML = employees.length
+        ? employees
+            .map(function (e) {
+              return (
+                "<tr><td>" +
+                escapeHtml(e.full_name) +
+                "</td><td>" +
+                escapeHtml(e.designation || "—") +
+                "</td><td class='td-num'>" +
+                formatPKR(e.salary_amount) +
+                "</td></tr>"
+              );
+            })
+            .join("")
+        : '<tr><td colspan="3" class="muted">No employees yet.</td></tr>';
+    }
+
+    const tbTx = $("tbodyCashTransactions");
+    if (tbTx) {
+      tbTx.innerHTML = txns.length
+        ? txns
+            .slice(0, 80)
+            .map(function (t) {
+              const sign = t.transaction_type === "income" ? "+" : "-";
+              return (
+                "<tr><td>" +
+                escapeHtml(formatDisplayDate(t.transaction_date)) +
+                "</td><td>" +
+                escapeHtml(cashAccountLabel(t.account_id)) +
+                "</td><td>" +
+                escapeHtml(labelFromCode(t.transaction_type)) +
+                "</td><td>" +
+                escapeHtml(labelFromCode(t.category)) +
+                "</td><td>" +
+                escapeHtml(t.description || "—") +
+                "</td><td class='td-num'><strong>" +
+                sign +
+                " " +
+                formatPKR(t.amount) +
+                "</strong></td></tr>"
+              );
+            })
+            .join("")
+        : '<tr><td colspan="6" class="muted">No cash transactions yet.</td></tr>';
+    }
+  }
+
+  function renderCashAccountSelectors() {
+    [
+      "cashIncomeAccount",
+      "expenseAccount",
+      "salaryAccount",
+      "materialAccount",
+      "wageAccount",
+      "payCashAccount",
+      "agentReceiptAccount",
+      "agentManageReceiptAccount"
+    ].forEach(function (id) {
+      buildCashAccountOptions($(id), true);
+    });
+  }
+
+  function requireCashAccount(accountId) {
+    if (accountId) return true;
+    toast("Select a cash account. Create one in Cash Flow first.", "err");
+    return false;
+  }
+
+  async function insertCashTransaction(row) {
+    const res = await getClient().from("cash_transactions").insert({
+      account_id: row.account_id,
+      transaction_type: row.transaction_type,
+      category: row.category,
+      amount: roundMoney(row.amount),
+      transaction_date: row.transaction_date || todayISODate(),
+      description: row.description || null,
+      source_type: row.source_type || null,
+      source_id: row.source_id || null,
+      created_by_user_id: state.currentUser && state.currentUser.id
+    }).select();
+    if (res.error) {
+      toast(res.error.message + " Run supabase/migration_cash_flow.sql if this table is missing.", "err");
+    }
+    return res;
+  }
+
+  async function saveCashAccount() {
+    if (!requireAdminAction()) return;
+    const name = ($("cashAccountName") && $("cashAccountName").value.trim()) || "";
+    const type = ($("cashAccountType") && $("cashAccountType").value) || "cash_in_hand";
+    const opening = Number(($("cashOpeningBalance") && $("cashOpeningBalance").value) || 0);
+    if (!name) {
+      toast("Enter cash account name.", "err");
+      return;
+    }
+    const res = await getClient().from("cash_accounts").insert({
+      account_name: name,
+      account_type: type,
+      opening_balance: roundMoney(opening),
+      is_active: true
+    });
+    if (res.error) {
+      toast(res.error.message + " Run supabase/migration_cash_flow.sql if this table is missing.", "err");
+      return;
+    }
+    ["cashAccountName", "cashOpeningBalance"].forEach(function (id) {
+      const el = $(id);
+      if (el) el.value = id === "cashOpeningBalance" ? "0" : "";
+    });
+    toast("Cash account added.", "ok");
+    await refresh();
+  }
+
+  async function saveCashIncome() {
+    if (!requireAdminAction()) return;
+    const accountId = $("cashIncomeAccount") && $("cashIncomeAccount").value;
+    const amount = Number(($("cashIncomeAmount") && $("cashIncomeAmount").value) || 0);
+    const date = ($("cashIncomeDate") && $("cashIncomeDate").value) || todayISODate();
+    if (!requireCashAccount(accountId)) return;
+    if (!(amount > 0)) {
+      toast("Enter a positive income amount.", "err");
+      return;
+    }
+    if (!parseISODateLocal(date)) {
+      toast("Select a valid date.", "err");
+      return;
+    }
+    const res = await insertCashTransaction({
+      account_id: accountId,
+      transaction_type: "income",
+      category: ($("cashIncomeType") && $("cashIncomeType").value) || "other_income",
+      amount: amount,
+      transaction_date: date,
+      description: ($("cashIncomeNotes") && $("cashIncomeNotes").value.trim()) || ""
+    });
+    if (res.error) return;
+    ["cashIncomeAmount", "cashIncomeNotes"].forEach(function (id) {
+      const el = $(id);
+      if (el) el.value = "";
+    });
+    toast("Cash received recorded.", "ok");
+    await refresh();
+  }
+
+  async function saveExpenseRecord() {
+    if (!requireAdminAction()) return;
+    const accountId = $("expenseAccount") && $("expenseAccount").value;
+    const amount = Number(($("expenseAmount") && $("expenseAmount").value) || 0);
+    const date = ($("expenseDate") && $("expenseDate").value) || todayISODate();
+    const type = ($("expenseType") && $("expenseType").value) || "other_expense";
+    const desc = ($("expenseDesc") && $("expenseDesc").value.trim()) || "";
+    if (!requireCashAccount(accountId)) return;
+    if (!(amount > 0)) {
+      toast("Enter a positive expense amount.", "err");
+      return;
+    }
+    if (!parseISODateLocal(date)) {
+      toast("Select a valid expense date.", "err");
+      return;
+    }
+    const sb = getClient();
+    const exp = await sb.from("expense_records").insert({
+      account_id: accountId,
+      expense_type: type,
+      amount: roundMoney(amount),
+      expense_date: date,
+      description: desc || null,
+      created_by_user_id: state.currentUser && state.currentUser.id
+    }).select();
+    if (exp.error) {
+      toast(exp.error.message + " Run supabase/migration_cash_flow.sql if this table is missing.", "err");
+      return;
+    }
+    const expenseId = exp.data && exp.data[0] && exp.data[0].id;
+    const tx = await insertCashTransaction({
+      account_id: accountId,
+      transaction_type: "expense",
+      category: type,
+      amount: amount,
+      transaction_date: date,
+      description: desc,
+      source_type: "expense_record",
+      source_id: expenseId
+    });
+    if (tx.error) return;
+    ["expenseAmount", "expenseDesc"].forEach(function (id) {
+      const el = $(id);
+      if (el) el.value = "";
+    });
+    toast("Expense recorded.", "ok");
+    await refresh();
+  }
+
+  async function saveEmployeeRecord() {
+    if (!requireAdminAction()) return;
+    const name = ($("empName") && $("empName").value.trim()) || "";
+    if (!name) {
+      toast("Enter employee name.", "err");
+      return;
+    }
+    const res = await getClient().from("employees").insert({
+      full_name: name,
+      phone: ($("empPhone") && $("empPhone").value.trim()) || null,
+      designation: ($("empDesignation") && $("empDesignation").value.trim()) || null,
+      salary_amount: roundMoney(Number(($("empSalary") && $("empSalary").value) || 0)),
+      is_active: true
+    });
+    if (res.error) {
+      toast(res.error.message + " Run supabase/migration_cash_flow.sql if this table is missing.", "err");
+      return;
+    }
+    ["empName", "empPhone", "empDesignation", "empSalary"].forEach(function (id) {
+      const el = $(id);
+      if (el) el.value = "";
+    });
+    toast("Employee added.", "ok");
+    await refresh();
+  }
+
+  async function saveSalaryRecord() {
+    if (!requireAdminAction()) return;
+    const employeeId = $("salaryEmployee") && $("salaryEmployee").value;
+    const accountId = $("salaryAccount") && $("salaryAccount").value;
+    const amount = Number(($("salaryAmount") && $("salaryAmount").value) || 0);
+    const date = ($("salaryDate") && $("salaryDate").value) || todayISODate();
+    const month = ($("salaryMonth") && $("salaryMonth").value.trim()) || "";
+    if (!employeeId) {
+      toast("Select employee.", "err");
+      return;
+    }
+    if (!requireCashAccount(accountId)) return;
+    if (!month) {
+      toast("Enter salary month.", "err");
+      return;
+    }
+    if (!(amount > 0)) {
+      toast("Enter a positive salary amount.", "err");
+      return;
+    }
+    const sb = getClient();
+    const sal = await sb.from("salary_records").insert({
+      employee_id: employeeId,
+      account_id: accountId,
+      amount: roundMoney(amount),
+      salary_month: month,
+      paid_date: date,
+      notes: ($("salaryNotes") && $("salaryNotes").value.trim()) || null,
+      created_by_user_id: state.currentUser && state.currentUser.id
+    }).select();
+    if (sal.error) {
+      toast(sal.error.message + " Run supabase/migration_cash_flow.sql if this table is missing.", "err");
+      return;
+    }
+    const employee = (state.employees || []).find(function (e) { return e.id === employeeId; });
+    const tx = await insertCashTransaction({
+      account_id: accountId,
+      transaction_type: "expense",
+      category: "salary",
+      amount: amount,
+      transaction_date: date,
+      description: "Salary " + month + " - " + ((employee && employee.full_name) || "Employee"),
+      source_type: "salary_record",
+      source_id: sal.data && sal.data[0] && sal.data[0].id
+    });
+    if (tx.error) return;
+    ["salaryAmount", "salaryNotes"].forEach(function (id) {
+      const el = $(id);
+      if (el) el.value = "";
+    });
+    toast("Salary recorded.", "ok");
+    await refresh();
+  }
+
+  async function saveMaterialPurchase() {
+    if (!requireAdminAction()) return;
+    const accountId = $("materialAccount") && $("materialAccount").value;
+    const name = ($("materialName") && $("materialName").value.trim()) || "";
+    const qty = Number(($("materialQty") && $("materialQty").value) || 1);
+    const unit = Number(($("materialUnitCost") && $("materialUnitCost").value) || 0);
+    const totalRaw = Number(($("materialTotal") && $("materialTotal").value) || 0);
+    const total = totalRaw > 0 ? totalRaw : qty * unit;
+    const date = ($("materialDate") && $("materialDate").value) || todayISODate();
+    if (!requireCashAccount(accountId)) return;
+    if (!name) {
+      toast("Enter material name.", "err");
+      return;
+    }
+    if (!(total > 0)) {
+      toast("Enter material total amount.", "err");
+      return;
+    }
+    const sb = getClient();
+    const mat = await sb.from("material_purchases").insert({
+      account_id: accountId,
+      material_name: name,
+      material_type: ($("materialType") && $("materialType").value.trim()) || null,
+      quantity: roundMoney(qty || 1),
+      unit_cost: roundMoney(unit || 0),
+      total_amount: roundMoney(total),
+      purchase_date: date,
+      vendor: ($("materialVendor") && $("materialVendor").value.trim()) || null,
+      notes: ($("materialNotes") && $("materialNotes").value.trim()) || null,
+      created_by_user_id: state.currentUser && state.currentUser.id
+    }).select();
+    if (mat.error) {
+      toast(mat.error.message + " Run supabase/migration_cash_flow.sql if this table is missing.", "err");
+      return;
+    }
+    const tx = await insertCashTransaction({
+      account_id: accountId,
+      transaction_type: "expense",
+      category: "material_purchase",
+      amount: total,
+      transaction_date: date,
+      description: name + (($("materialType") && $("materialType").value.trim()) ? " - " + $("materialType").value.trim() : ""),
+      source_type: "material_purchase",
+      source_id: mat.data && mat.data[0] && mat.data[0].id
+    });
+    if (tx.error) return;
+    ["materialName", "materialType", "materialUnitCost", "materialTotal", "materialVendor", "materialNotes"].forEach(function (id) {
+      const el = $(id);
+      if (el) el.value = "";
+    });
+    if ($("materialQty")) $("materialQty").value = "1";
+    toast("Material purchase recorded.", "ok");
+    await refresh();
+  }
+
+  async function saveDailyWageRecord() {
+    if (!requireAdminAction()) return;
+    const accountId = $("wageAccount") && $("wageAccount").value;
+    const worker = ($("wageWorker") && $("wageWorker").value.trim()) || "";
+    const workType = ($("wageWorkType") && $("wageWorkType").value.trim()) || "";
+    const amount = Number(($("wageAmount") && $("wageAmount").value) || 0);
+    const date = ($("wageDate") && $("wageDate").value) || todayISODate();
+    if (!requireCashAccount(accountId)) return;
+    if (!worker || !workType) {
+      toast("Enter worker name and work type.", "err");
+      return;
+    }
+    if (!(amount > 0)) {
+      toast("Enter a positive wage amount.", "err");
+      return;
+    }
+    const sb = getClient();
+    const wage = await sb.from("daily_wage_records").insert({
+      account_id: accountId,
+      worker_name: worker,
+      work_type: workType,
+      amount: roundMoney(amount),
+      work_date: date,
+      notes: ($("wageNotes") && $("wageNotes").value.trim()) || null,
+      created_by_user_id: state.currentUser && state.currentUser.id
+    }).select();
+    if (wage.error) {
+      toast(wage.error.message + " Run supabase/migration_cash_flow.sql if this table is missing.", "err");
+      return;
+    }
+    const tx = await insertCashTransaction({
+      account_id: accountId,
+      transaction_type: "expense",
+      category: "daily_wage",
+      amount: amount,
+      transaction_date: date,
+      description: workType + " - " + worker,
+      source_type: "daily_wage_record",
+      source_id: wage.data && wage.data[0] && wage.data[0].id
+    });
+    if (tx.error) return;
+    ["wageWorker", "wageWorkType", "wageAmount", "wageNotes"].forEach(function (id) {
+      const el = $(id);
+      if (el) el.value = "";
+    });
+    toast("Daily wage recorded.", "ok");
+    await refresh();
+  }
+
   function canAccessView(name) {
     if (!isCollector()) return true;
     return ["dashboard", "customers", "dues", "collection", "reports", "settings"].indexOf(name) !== -1;
@@ -2349,7 +2913,7 @@
 
   function applyRolePermissions() {
     const collector = isCollector();
-    document.querySelectorAll('[data-view="packages"], [data-view="payments"], [data-view="areas"], [data-view="agents"]').forEach(function (el) {
+    document.querySelectorAll('[data-view="packages"], [data-view="payments"], [data-view="areas"], [data-view="agents"], [data-view="cashflow"]').forEach(function (el) {
       el.hidden = collector;
     });
     document.querySelectorAll(".admin-only").forEach(function (el) {
@@ -2575,6 +3139,7 @@
       customers: "Customers",
       dues: "Dues",
       collection: "Collection",
+      cashflow: "Cash Flow",
       agents: "Agents",
       packages: "Packages",
       payments: "Payment Methods",
@@ -2585,6 +3150,7 @@
     const pt = $("pageTitle");
     if (pt) pt.textContent = titles[name] || "Dashboard";
     if (name === "collection") renderCollection();
+    if (name === "cashflow") renderCashFlow();
     if (name === "agents") renderAgentsPanel();
     if (name === "reports") renderReportsInline();
   }
@@ -3158,6 +3724,7 @@
     } else {
       if (recvFields) recvFields.hidden = false;
       buildPaymentMethodOptions($("payMethod"));
+      buildCashAccountOptions($("payCashAccount"), true);
       if (dueLab) dueLab.textContent = "Outstanding dues";
       $("modalPaymentTitle").textContent = "Receive payment";
       if (cardTitle) cardTitle.textContent = "Collect payment";
@@ -3285,6 +3852,7 @@
       return;
     }
     const methodId = $("payMethod").value;
+    const cashAccountId = $("payCashAccount") ? $("payCashAccount").value : "";
     const receiveRaw =
       ($("payReceiveDate") && $("payReceiveDate").value.trim()) || "";
     const t = todayISODate();
@@ -3388,6 +3956,24 @@
         return x.id === c.id;
       });
       if (cust) cust.due_amount = alloc.newDue;
+    }
+
+    if (cashAccountId && payId) {
+      const txRes = await insertCashTransaction({
+        account_id: cashAccountId,
+        transaction_type: "income",
+        category: "customer_collection",
+        amount: paid,
+        transaction_date: paymentDateIso,
+        description:
+          "Customer payment - " +
+          ((c.full_name || c.pppoe_id || "Customer") + " / " + inv),
+        source_type: "payment",
+        source_id: payId
+      });
+      if (txRes.error) {
+        console.warn(txRes.error);
+      }
     }
 
     toast(M.payments.saved, "ok");
@@ -4707,6 +5293,7 @@
       renderDiscounts();
       renderUsers();
       renderCollection();
+      renderCashFlow();
       renderAgentsPanel();
       renderReportsInline();
       renderDueLedgerCustomerSelect();
@@ -4816,7 +5403,7 @@
       return String(b.created_at || "").localeCompare(String(a.created_at || ""));
     });
     if (!rows.length) {
-      tb.innerHTML = "<tr><td colspan='5' class='muted'>No handover records yet.</td></tr>";
+      tb.innerHTML = "<tr><td colspan='" + (isAdminUser() ? "6" : "5") + "' class='muted'>No handover records yet.</td></tr>";
       return;
     }
     tb.innerHTML = rows
@@ -4832,6 +5419,18 @@
           escapeHtml(userDisplayName(r.received_by_user_id)) +
           "</td><td>" +
           escapeHtml(r.notes || "—") +
+          (isAdminUser()
+            ? '</td><td class="no-print">' +
+              '<button class="btn ghost" type="button" data-agent-receipt-invoice="' +
+              escapeHtml(r.id) +
+              '">Invoice</button> ' +
+              '<button class="btn ghost" type="button" data-agent-receipt-edit="' +
+              escapeHtml(r.id) +
+              '">Edit</button> ' +
+              '<button class="btn danger" type="button" data-agent-receipt-del="' +
+              escapeHtml(r.id) +
+              '">Delete</button>'
+            : "") +
           "</td></tr>"
         );
       })
@@ -4840,10 +5439,137 @@
 
   function renderAgentCollectionPanel() {
     renderAgentReceiptAgentOptions();
+    buildCashAccountOptions($("agentReceiptAccount"), true);
     renderAgentCollectionSummary();
     renderAgentReceipts();
     const dt = $("agentReceiptDate");
     if (dt && !dt.value) dt.value = todayISODate();
+  }
+
+  function renderAgentReceiptEditAgentOptions(selectedId) {
+    const sel = $("agentReceiptEditAgent");
+    if (!sel) return;
+    const opts = ['<option value="">— Select agent —</option>'];
+    collectionAgents().forEach(function (u) {
+      opts.push(
+        '<option value="' +
+          escapeHtml(u.id) +
+          '">' +
+          escapeHtml((u.full_name || u.username || "User") + " (" + u.role + ")") +
+          "</option>"
+      );
+    });
+    sel.innerHTML = opts.join("");
+    if (selectedId) sel.value = selectedId;
+  }
+
+  function openAgentReceiptEditModal(receiptId) {
+    if (!requireAdminAction()) return;
+    const r = state.agentCollectionReceipts.find(function (x) {
+      return x.id === receiptId;
+    });
+    if (!r) {
+      toast("Handover record not found.", "err");
+      return;
+    }
+    renderAgentReceiptEditAgentOptions(r.agent_id);
+    if ($("agentReceiptEditId")) $("agentReceiptEditId").value = r.id;
+    if ($("agentReceiptEditAmount")) $("agentReceiptEditAmount").value = Number(r.amount || 0);
+    if ($("agentReceiptEditDate")) $("agentReceiptEditDate").value = r.received_date || todayISODate();
+    if ($("agentReceiptEditNotes")) $("agentReceiptEditNotes").value = r.notes || "";
+    openBackdrop($("modalAgentReceiptEdit"));
+  }
+
+  async function updateAgentReceiptRecord() {
+    if (!requireAdminAction()) return;
+    const id = $("agentReceiptEditId") ? $("agentReceiptEditId").value : "";
+    const agentId = $("agentReceiptEditAgent") ? $("agentReceiptEditAgent").value : "";
+    const amount = Number($("agentReceiptEditAmount") && $("agentReceiptEditAmount").value);
+    const date = ($("agentReceiptEditDate") && $("agentReceiptEditDate").value) || "";
+    const notes = ($("agentReceiptEditNotes") && $("agentReceiptEditNotes").value.trim()) || "";
+    if (!id) {
+      toast("Handover record not found.", "err");
+      return;
+    }
+    if (!agentId) {
+      toast("Select an agent.", "err");
+      return;
+    }
+    if (!(amount > 0)) {
+      toast("Enter a positive amount.", "err");
+      return;
+    }
+    if (!parseISODateLocal(date)) {
+      toast("Select a valid received date.", "err");
+      return;
+    }
+    const sb = getClient();
+    const res = await sb
+      .from("agent_collection_receipts")
+      .update({
+        agent_id: agentId,
+        amount: amount,
+        received_date: date,
+        notes: notes || null
+      })
+      .eq("id", id);
+    if (res.error) {
+      toast(res.error.message, "err");
+      return;
+    }
+    const cashTxn = (state.cashTransactions || []).find(function (t) {
+      return t.source_type === "agent_collection_receipt" && t.source_id === id;
+    });
+    if (cashTxn) {
+      const txRes = await sb
+        .from("cash_transactions")
+        .update({
+          amount: roundMoney(amount),
+          transaction_date: date,
+          description: "Agent handover - " + userDisplayName(agentId)
+        })
+        .eq("id", cashTxn.id);
+      if (txRes.error) console.warn(txRes.error);
+    }
+    closeBackdrop($("modalAgentReceiptEdit"));
+    toast("Handover record updated.", "ok");
+    await refresh();
+  }
+
+  async function deleteAgentReceiptRecord(receiptId) {
+    if (!requireAdminAction()) return;
+    const r = state.agentCollectionReceipts.find(function (x) {
+      return x.id === receiptId;
+    });
+    if (!r) {
+      toast("Handover record not found.", "err");
+      return;
+    }
+    const ok = window.confirm(
+      "Delete this handover record for " +
+        userDisplayName(r.agent_id) +
+        " amount " +
+        formatPKR(r.amount) +
+        "?"
+    );
+    if (!ok) return;
+    const sb = getClient();
+    const txDel = await sb
+      .from("cash_transactions")
+      .delete()
+      .eq("source_type", "agent_collection_receipt")
+      .eq("source_id", receiptId);
+    if (txDel.error) console.warn(txDel.error);
+    const res = await sb
+      .from("agent_collection_receipts")
+      .delete()
+      .eq("id", receiptId);
+    if (res.error) {
+      toast(res.error.message, "err");
+      return;
+    }
+    toast("Handover record deleted.", "ok");
+    await refresh();
   }
 
   async function insertAgentCollectionReceipt(agentId, amount, date, notes) {
@@ -4887,11 +5613,30 @@
     openBackdrop($("modalInvoice"));
   }
 
+  function openSavedAgentHandoverReceipt(receiptId) {
+    const r = state.agentCollectionReceipts.find(function (x) {
+      return x.id === receiptId;
+    });
+    if (!r) {
+      toast("Handover record not found.", "err");
+      return;
+    }
+    openAgentHandoverReceipt({
+      receiptNo: "AGENT-" + String(r.id).slice(0, 8).toUpperCase(),
+      agentId: r.agent_id,
+      receivedByUserId: r.received_by_user_id,
+      amount: Number(r.amount || 0),
+      receivedDate: r.received_date,
+      notes: r.notes || ""
+    });
+  }
+
   async function saveAgentCollectionReceipt() {
     if (!requireAdminAction()) return;
     const agentId = $("agentReceiptAgent") ? $("agentReceiptAgent").value : "";
     const amount = Number($("agentReceiptAmount") && $("agentReceiptAmount").value);
     const date = ($("agentReceiptDate") && $("agentReceiptDate").value) || todayISODate();
+    const accountId = $("agentReceiptAccount") ? $("agentReceiptAccount").value : "";
     const notes = ($("agentReceiptNotes") && $("agentReceiptNotes").value.trim()) || "";
     if (!agentId) {
       toast("Select an agent.", "err");
@@ -4909,6 +5654,19 @@
     if (res.error) {
       toast(res.error.message + " Run migration_agent_collections.sql if this table is missing.", "err");
       return;
+    }
+    const receiptId = res.data && res.data[0] && res.data[0].id;
+    if (accountId && receiptId) {
+      await insertCashTransaction({
+        account_id: accountId,
+        transaction_type: "income",
+        category: "agent_handover",
+        amount: amount,
+        transaction_date: date,
+        description: "Agent handover - " + userDisplayName(agentId),
+        source_type: "agent_collection_receipt",
+        source_id: receiptId
+      });
     }
     ["agentReceiptAmount", "agentReceiptNotes"].forEach(function (id) {
       const el = $(id);
@@ -5046,6 +5804,7 @@
   function renderAgentsPanel() {
     if (!isAdminUser()) return;
     renderAgentManageOptions();
+    buildCashAccountOptions($("agentManageReceiptAccount"), true);
     renderAgentAreaAccessList();
     renderAgentManageSummary();
     renderAgentManagePayments();
@@ -5087,6 +5846,7 @@
     const agentId = selectedManageAgentId();
     const amount = Number($("agentManageReceiptAmount") && $("agentManageReceiptAmount").value);
     const date = ($("agentManageReceiptDate") && $("agentManageReceiptDate").value) || todayISODate();
+    const accountId = $("agentManageReceiptAccount") ? $("agentManageReceiptAccount").value : "";
     const notes = ($("agentManageReceiptNotes") && $("agentManageReceiptNotes").value.trim()) || "";
     if (!agentId) {
       toast("Select an agent.", "err");
@@ -5104,6 +5864,19 @@
     if (res.error) {
       toast(res.error.message + " Run migration_agent_collections.sql if this table is missing.", "err");
       return;
+    }
+    const receiptId = res.data && res.data[0] && res.data[0].id;
+    if (accountId && receiptId) {
+      await insertCashTransaction({
+        account_id: accountId,
+        transaction_type: "income",
+        category: "agent_handover",
+        amount: amount,
+        transaction_date: date,
+        description: "Agent handover - " + userDisplayName(agentId),
+        source_type: "agent_collection_receipt",
+        source_id: receiptId
+      });
     }
     ["agentManageReceiptAmount", "agentManageReceiptNotes"].forEach(function (id) {
       const el = $(id);
@@ -6277,6 +7050,44 @@
       });
     }
     onIf("btnSaveAgentReceipt", "click", saveAgentCollectionReceipt);
+    onIf("btnUpdateAgentReceipt", "click", updateAgentReceiptRecord);
+    onIf("btnSaveCashAccount", "click", saveCashAccount);
+    onIf("btnSaveCashIncome", "click", saveCashIncome);
+    onIf("btnSaveExpense", "click", saveExpenseRecord);
+    onIf("btnSaveEmployee", "click", saveEmployeeRecord);
+    onIf("btnSaveSalary", "click", saveSalaryRecord);
+    onIf("btnSaveMaterial", "click", saveMaterialPurchase);
+    onIf("btnSaveWage", "click", saveDailyWageRecord);
+    ["materialQty", "materialUnitCost"].forEach(function (id) {
+      const el = $(id);
+      if (el) {
+        el.addEventListener("input", function () {
+          const qty = Number(($("materialQty") && $("materialQty").value) || 0);
+          const unit = Number(($("materialUnitCost") && $("materialUnitCost").value) || 0);
+          const total = $("materialTotal");
+          if (total && qty > 0 && unit > 0) total.value = String(roundMoney(qty * unit));
+        });
+      }
+    });
+    const agentReceiptBody = $("tbodyAgentReceipts");
+    if (agentReceiptBody) {
+      agentReceiptBody.addEventListener("click", async function (ev) {
+        const inv = ev.target.closest("[data-agent-receipt-invoice]");
+        if (inv) {
+          openSavedAgentHandoverReceipt(inv.getAttribute("data-agent-receipt-invoice"));
+          return;
+        }
+        const edit = ev.target.closest("[data-agent-receipt-edit]");
+        if (edit) {
+          openAgentReceiptEditModal(edit.getAttribute("data-agent-receipt-edit"));
+          return;
+        }
+        const del = ev.target.closest("[data-agent-receipt-del]");
+        if (del) {
+          await deleteAgentReceiptRecord(del.getAttribute("data-agent-receipt-del"));
+        }
+      });
+    }
     onIf("agentManageSelect", "change", renderAgentsPanel);
     onIf("btnSaveAgentAreas", "click", saveAgentAreaAccess);
     onIf("btnAgentManageReceipt", "click", saveAgentManageReceipt);

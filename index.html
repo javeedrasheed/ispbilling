@@ -49,6 +49,10 @@
             <i class="fa-solid fa-coins" aria-hidden="true"></i>
             Collection
           </button>
+          <button type="button" data-view="cashflow">
+            <i class="fa-solid fa-vault" aria-hidden="true"></i>
+            Cash Flow
+          </button>
           <button type="button" data-view="packages">
             <i class="fa-solid fa-gauge-high" aria-hidden="true"></i>
             Packages
@@ -376,6 +380,10 @@
                 <label for="agentReceiptDate">Received date</label>
                 <input id="agentReceiptDate" type="date" />
               </div>
+              <div class="field">
+                <label for="agentReceiptAccount">Deposit to cash account</label>
+                <select id="agentReceiptAccount"></select>
+              </div>
               <div class="field full">
                 <label for="agentReceiptNotes">Notes</label>
                 <input id="agentReceiptNotes" type="text" placeholder="Cash received / bank deposit / remarks" />
@@ -417,6 +425,307 @@
           </div>
         </section>
 
+        <section id="view-cashflow" class="view" aria-label="Cash Flow">
+          <div class="grid stats">
+            <div class="card">
+              <div class="label">Cash / bank balance</div>
+              <div class="value" id="statCashBalance">0</div>
+            </div>
+            <div class="card">
+              <div class="label">Income recorded</div>
+              <div class="value" id="statCashIncome">0</div>
+            </div>
+            <div class="card">
+              <div class="label">Expenses recorded</div>
+              <div class="value" id="statCashExpense">0</div>
+            </div>
+          </div>
+
+          <div class="card push">
+            <div class="label">Cash accounts</div>
+            <p class="hint tight">Create accounts like Cash in hand, Bank account, Easypaisa/JazzCash wallet, or any other cash/bank location.</p>
+            <div class="form-grid push-md">
+              <div class="field">
+                <label for="cashAccountName">Account name</label>
+                <input id="cashAccountName" placeholder="Cash in hand / Bank account" />
+              </div>
+              <div class="field">
+                <label for="cashAccountType">Type</label>
+                <select id="cashAccountType">
+                  <option value="cash_in_hand">Cash in hand</option>
+                  <option value="bank">Bank</option>
+                  <option value="wallet">Wallet</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="cashOpeningBalance">Opening balance</label>
+                <input id="cashOpeningBalance" type="number" step="0.01" value="0" />
+              </div>
+            </div>
+            <div class="actions-row end no-print">
+              <button class="btn primary" type="button" id="btnSaveCashAccount">
+                <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                Add account
+              </button>
+            </div>
+            <div class="table-wrap push">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Account</th>
+                    <th>Type</th>
+                    <th>Opening</th>
+                    <th>Current balance</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyCashAccounts"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card push">
+            <div class="label">Record cash received</div>
+            <div class="form-grid push-md">
+              <div class="field">
+                <label for="cashIncomeAccount">Account</label>
+                <select id="cashIncomeAccount"></select>
+              </div>
+              <div class="field">
+                <label for="cashIncomeType">Income type</label>
+                <select id="cashIncomeType">
+                  <option value="customer_collection">Customer collection</option>
+                  <option value="agent_handover">Agent handover</option>
+                  <option value="bank_deposit">Bank deposit</option>
+                  <option value="owner_investment">Owner investment</option>
+                  <option value="other_income">Other income</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="cashIncomeAmount">Amount</label>
+                <input id="cashIncomeAmount" type="number" step="0.01" min="0.01" />
+              </div>
+              <div class="field">
+                <label for="cashIncomeDate">Date</label>
+                <input id="cashIncomeDate" type="date" />
+              </div>
+              <div class="field full">
+                <label for="cashIncomeNotes">Notes</label>
+                <input id="cashIncomeNotes" placeholder="Receivable cash sent/deposited into this account" />
+              </div>
+            </div>
+            <div class="actions-row end no-print">
+              <button class="btn success" type="button" id="btnSaveCashIncome">Record cash in</button>
+            </div>
+          </div>
+
+          <div class="card push">
+            <div class="label">Record expenditure</div>
+            <div class="form-grid push-md">
+              <div class="field">
+                <label for="expenseAccount">Paid from account</label>
+                <select id="expenseAccount"></select>
+              </div>
+              <div class="field">
+                <label for="expenseType">Expense type</label>
+                <select id="expenseType">
+                  <option value="bike_fuel">Bike fuel</option>
+                  <option value="car_fuel">Car fuel</option>
+                  <option value="breakfast">Breakfast</option>
+                  <option value="lunch">Lunch</option>
+                  <option value="dinner">Dinner</option>
+                  <option value="tea">Tea</option>
+                  <option value="bike_puncture">Bike tyre puncture repair</option>
+                  <option value="bike_tyre_tube">Tyre / tube replacement</option>
+                  <option value="other_expense">Other expense</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="expenseAmount">Amount</label>
+                <input id="expenseAmount" type="number" step="0.01" min="0.01" />
+              </div>
+              <div class="field">
+                <label for="expenseDate">Date</label>
+                <input id="expenseDate" type="date" />
+              </div>
+              <div class="field full">
+                <label for="expenseDesc">Details</label>
+                <input id="expenseDesc" placeholder="Fuel/lunch/repair details" />
+              </div>
+            </div>
+            <div class="actions-row end no-print">
+              <button class="btn danger" type="button" id="btnSaveExpense">Record expense</button>
+            </div>
+          </div>
+
+          <div class="grid two push">
+            <div class="card">
+              <div class="label">Employees</div>
+              <div class="form-grid push-md">
+                <div class="field">
+                  <label for="empName">Employee name</label>
+                  <input id="empName" />
+                </div>
+                <div class="field">
+                  <label for="empPhone">Phone</label>
+                  <input id="empPhone" />
+                </div>
+                <div class="field">
+                  <label for="empDesignation">Designation</label>
+                  <input id="empDesignation" placeholder="Technician / rider / office" />
+                </div>
+                <div class="field">
+                  <label for="empSalary">Monthly salary</label>
+                  <input id="empSalary" type="number" step="0.01" min="0" />
+                </div>
+              </div>
+              <div class="actions-row end no-print">
+                <button class="btn primary" type="button" id="btnSaveEmployee">Add employee</button>
+              </div>
+              <div class="table-wrap push">
+                <table>
+                  <thead>
+                    <tr><th>Name</th><th>Designation</th><th>Salary</th></tr>
+                  </thead>
+                  <tbody id="tbodyEmployees"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="label">Salary payment</div>
+              <div class="form-grid push-md">
+                <div class="field">
+                  <label for="salaryEmployee">Employee</label>
+                  <select id="salaryEmployee"></select>
+                </div>
+                <div class="field">
+                  <label for="salaryAccount">Paid from account</label>
+                  <select id="salaryAccount"></select>
+                </div>
+                <div class="field">
+                  <label for="salaryMonth">Salary month</label>
+                  <input id="salaryMonth" placeholder="May 2026" />
+                </div>
+                <div class="field">
+                  <label for="salaryAmount">Amount</label>
+                  <input id="salaryAmount" type="number" step="0.01" min="0.01" />
+                </div>
+                <div class="field">
+                  <label for="salaryDate">Paid date</label>
+                  <input id="salaryDate" type="date" />
+                </div>
+                <div class="field">
+                  <label for="salaryNotes">Notes</label>
+                  <input id="salaryNotes" />
+                </div>
+              </div>
+              <div class="actions-row end no-print">
+                <button class="btn danger" type="button" id="btnSaveSalary">Record salary</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid two push">
+            <div class="card">
+              <div class="label">Material purchase</div>
+              <div class="form-grid push-md">
+                <div class="field">
+                  <label for="materialAccount">Paid from account</label>
+                  <select id="materialAccount"></select>
+                </div>
+                <div class="field">
+                  <label for="materialName">Material name</label>
+                  <input id="materialName" placeholder="Router / cable / splitter / joint box" />
+                </div>
+                <div class="field">
+                  <label for="materialType">Material type</label>
+                  <input id="materialType" placeholder="Will add custom type here" />
+                </div>
+                <div class="field">
+                  <label for="materialQty">Quantity</label>
+                  <input id="materialQty" type="number" step="0.01" min="0.01" value="1" />
+                </div>
+                <div class="field">
+                  <label for="materialUnitCost">Unit cost</label>
+                  <input id="materialUnitCost" type="number" step="0.01" min="0" />
+                </div>
+                <div class="field">
+                  <label for="materialTotal">Total amount</label>
+                  <input id="materialTotal" type="number" step="0.01" min="0.01" />
+                </div>
+                <div class="field">
+                  <label for="materialDate">Purchase date</label>
+                  <input id="materialDate" type="date" />
+                </div>
+                <div class="field">
+                  <label for="materialVendor">Vendor</label>
+                  <input id="materialVendor" />
+                </div>
+                <div class="field full">
+                  <label for="materialNotes">Notes</label>
+                  <input id="materialNotes" />
+                </div>
+              </div>
+              <div class="actions-row end no-print">
+                <button class="btn danger" type="button" id="btnSaveMaterial">Record material purchase</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="label">Daily wage worker</div>
+              <div class="form-grid push-md">
+                <div class="field">
+                  <label for="wageAccount">Paid from account</label>
+                  <select id="wageAccount"></select>
+                </div>
+                <div class="field">
+                  <label for="wageWorker">Worker name</label>
+                  <input id="wageWorker" />
+                </div>
+                <div class="field">
+                  <label for="wageWorkType">Work type</label>
+                  <input id="wageWorkType" placeholder="Digging / cable laying / repair" />
+                </div>
+                <div class="field">
+                  <label for="wageAmount">Amount</label>
+                  <input id="wageAmount" type="number" step="0.01" min="0.01" />
+                </div>
+                <div class="field">
+                  <label for="wageDate">Work date</label>
+                  <input id="wageDate" type="date" />
+                </div>
+                <div class="field">
+                  <label for="wageNotes">Notes</label>
+                  <input id="wageNotes" />
+                </div>
+              </div>
+              <div class="actions-row end no-print">
+                <button class="btn danger" type="button" id="btnSaveWage">Record daily wage</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card push">
+            <div class="label">Recent cash transactions</div>
+            <div class="table-wrap push">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Account</th>
+                    <th>Type</th>
+                    <th>Category</th>
+                    <th>Description</th>
+                    <th>Amount</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyCashTransactions"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
         <section id="view-agents" class="view" aria-label="Agents">
           <div class="card">
             <div class="label">Agent control</div>
@@ -455,6 +764,10 @@
               <div class="field">
                 <label for="agentManageReceiptDate">Received date</label>
                 <input id="agentManageReceiptDate" type="date" />
+              </div>
+              <div class="field">
+                <label for="agentManageReceiptAccount">Deposit to cash account</label>
+                <select id="agentManageReceiptAccount"></select>
               </div>
               <div class="field full">
                 <label for="agentManageReceiptNotes">Notes</label>
@@ -1289,6 +1602,10 @@
             <div class="field">
               <label for="payMethod">Payment method</label>
               <select id="payMethod"></select>
+            </div>
+            <div class="field">
+              <label for="payCashAccount">Deposit to cash account</label>
+              <select id="payCashAccount"></select>
             </div>
             <div class="field">
               <label for="payTxn">Transaction ID (optional)</label>
